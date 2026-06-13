@@ -1,7 +1,9 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import PropertyMock, patch
 
 from tui.app import TwitchDropsTUI
+from tui.manager import TUIManager
 from tui.state import DropSnapshot, TUIState
 
 
@@ -79,6 +81,42 @@ class TUIApplicationTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             self.assertTrue(app.query_one("#channels-table").is_mounted)
             self.assertTrue(app.query_one("#campaigns-table").is_mounted)
+
+
+class TUIManagerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_start_uses_inline_mode_on_windows(self):
+        twitch = SimpleNamespace(
+            settings=SimpleNamespace(priority=[], exclude=set(), farm_unlinked=False)
+        )
+        manager = TUIManager(twitch)
+        run_kwargs = []
+
+        async def fake_run_async(self, **kwargs):
+            run_kwargs.append(kwargs)
+
+        with (
+            patch("tui.manager.sys.platform", "win32"),
+            patch.object(TwitchDropsTUI, "run_async", fake_run_async),
+        ):
+            manager.start()
+            await manager._app_task
+
+        self.assertEqual(
+            run_kwargs,
+            [{"inline": True, "inline_no_clear": True}],
+        )
+
+    async def test_wait_until_ready_has_timeout_fallback(self):
+        twitch = SimpleNamespace(
+            settings=SimpleNamespace(priority=[], exclude=set(), farm_unlinked=False)
+        )
+        manager = TUIManager(twitch)
+        manager._app = object()
+
+        with patch.object(manager, "READY_TIMEOUT", 0.01):
+            await manager.wait_until_ready()
+
+        self.assertTrue(manager._app_ready.is_set())
 
 
 if __name__ == "__main__":

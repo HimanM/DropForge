@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, TYPE_CHECKING
@@ -337,6 +338,8 @@ class TUITray:
 
 
 class TUIManager:
+    READY_TIMEOUT = 2.0
+
     def __init__(self, twitch: Twitch) -> None:
         self._twitch = twitch
         self.state = TUIState()
@@ -390,7 +393,10 @@ class TUIManager:
             on_toggle_farm_unlinked=self._toggle_farm_unlinked,
             on_ready=self._mark_app_ready,
         )
-        self._app_task = asyncio.create_task(self._app.run_async())
+        inline = sys.platform == "win32"
+        self._app_task = asyncio.create_task(
+            self._app.run_async(inline=inline, inline_no_clear=inline)
+        )
 
     def _mark_app_ready(self) -> None:
         logger.info("Terminal UI ready.")
@@ -399,7 +405,11 @@ class TUIManager:
     async def wait_until_ready(self) -> None:
         if self._app is None or self._app_ready.is_set():
             return
-        await self._app_ready.wait()
+        try:
+            await asyncio.wait_for(self._app_ready.wait(), timeout=self.READY_TIMEOUT)
+        except asyncio.TimeoutError:
+            logger.warning("Terminal UI did not report ready before startup timeout.")
+            self._app_ready.set()
 
     def stop(self) -> None:
         self.progress.stop_timer()
