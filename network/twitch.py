@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import asyncio
 import logging
+import inspect
 from time import time
 from copy import deepcopy
 from itertools import chain
@@ -612,7 +613,7 @@ class Twitch:
         • Selecting a stream to watch, and watching it
         • Changing the stream that's being watched if necessary
         """
-        self.gui.start()
+        await self._start_frontend()
         auth_state = await self.get_auth()
         await self.websocket.start()
         # NOTE: watch task is explicitly restarted on each new run
@@ -984,6 +985,16 @@ class Twitch:
         # this triggers a restart of this task every (up to) 60 minutes
         logger.log(CALL, "Maintenance task requests a reload")
         self.change_state(State.INVENTORY_FETCH)
+
+    async def _start_frontend(self) -> None:
+        start_result = self.gui.start()
+        if inspect.isawaitable(start_result):
+            await start_result
+        wait_until_ready = getattr(self.gui, "wait_until_ready", None)
+        if wait_until_ready is not None:
+            ready_result = wait_until_ready()
+            if inspect.isawaitable(ready_result):
+                await ready_result
 
     def can_watch(self, channel: Channel) -> bool:
         """

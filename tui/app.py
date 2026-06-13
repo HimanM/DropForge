@@ -111,6 +111,7 @@ class TwitchDropsTUI(App[None]):
         on_save_settings: abc.Callable[[str, str], None],
         on_cycle_priority_mode: abc.Callable[[], None],
         on_toggle_farm_unlinked: abc.Callable[[], None],
+        on_ready: abc.Callable[[], None] | None = None,
     ) -> None:
         super().__init__()
         self.state = state
@@ -121,6 +122,8 @@ class TwitchDropsTUI(App[None]):
         self._on_save_settings = on_save_settings
         self._on_cycle_priority_mode = on_cycle_priority_mode
         self._on_toggle_farm_unlinked = on_toggle_farm_unlinked
+        self._on_ready = on_ready or (lambda: None)
+        self._ready_for_refresh = False
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -171,7 +174,12 @@ class TwitchDropsTUI(App[None]):
         self.title = "Twitch Drops Miner TUI"
         self.sub_title = "tdminer"
         self._setup_tables()
+        self._ready_for_refresh = True
         self.refresh_all()
+        self._on_ready()
+
+    def on_unmount(self) -> None:
+        self._ready_for_refresh = False
 
     def _setup_tables(self) -> None:
         campaigns = self.query_one("#campaigns-table", DataTable)
@@ -184,7 +192,7 @@ class TwitchDropsTUI(App[None]):
         channels.add_columns("Channel", "Status", "Game", "Drops", "Viewers", "ACL")
 
     def _refresh_later(self, callback: abc.Callable[[], None]) -> None:
-        if self.is_running and self.is_mounted:
+        if self.is_running and self._ready_for_refresh:
             self.call_next(callback)
 
     def _widget(self, selector: str, widget_type: type[_WidgetT]) -> _WidgetT | None:
@@ -221,7 +229,7 @@ class TwitchDropsTUI(App[None]):
         self._refresh_later(lambda: self.refresh_settings(sync_inputs=True))
 
     def append_log_later(self, line: str) -> None:
-        if self.is_running and self.is_mounted:
+        if self.is_running and self._ready_for_refresh:
             self.call_next(lambda: self.append_log(line))
 
     def append_log(self, line: str) -> None:

@@ -32,6 +32,11 @@ if TYPE_CHECKING:
 
 
 WSMsgType = aiohttp.WSMsgType
+CONNECTION_RESET_ERRORS = tuple(
+    error
+    for error in (getattr(aiohttp, "ClientConnectionResetError", None), ConnectionResetError)
+    if error is not None
+)
 logger = logging.getLogger("TwitchDrops")
 ws_logger = logging.getLogger("TwitchDrops.websocket")
 
@@ -249,7 +254,7 @@ class Websocket:
         while True:
             try:
                 raw_message: aiohttp.WSMessage = await ws.receive(timeout=timeout)
-            except aiohttp.ClientConnectionResetError:
+            except CONNECTION_RESET_ERRORS:
                 raise WebsocketClosed(received=False)
             ws_logger.debug(f"Websocket[{self._idx}] received: {raw_message}")
             if raw_message.type is WSMsgType.TEXT:
@@ -328,7 +333,7 @@ class Websocket:
             message["nonce"] = create_nonce(CHARS_ASCII, 30)
         try:
             await ws.send_json(message, dumps=json_minify)
-        except aiohttp.ClientConnectionResetError:
+        except CONNECTION_RESET_ERRORS:
             raise WebsocketClosed(received=False)
         ws_logger.debug(f"Websocket[{self._idx}] sent: {message}")
 

@@ -337,6 +337,7 @@ class TUIManager:
         self._twitch = twitch
         self.state = TUIState()
         self._close_requested = asyncio.Event()
+        self._app_ready = asyncio.Event()
         self._app: TwitchDropsTUI | None = None
         self._app_task: asyncio.Task[Any] | None = None
 
@@ -373,6 +374,7 @@ class TUIManager:
     def start(self) -> None:
         if self._app_task is not None and not self._app_task.done():
             return
+        self._app_ready.clear()
         self._app = TwitchDropsTUI(
             self.state,
             on_close=self.close,
@@ -382,8 +384,14 @@ class TUIManager:
             on_save_settings=self._save_settings,
             on_cycle_priority_mode=self._cycle_priority_mode,
             on_toggle_farm_unlinked=self._toggle_farm_unlinked,
+            on_ready=self._app_ready.set,
         )
         self._app_task = asyncio.create_task(self._app.run_async())
+
+    async def wait_until_ready(self) -> None:
+        if self._app is None or self._app_ready.is_set():
+            return
+        await self._app_ready.wait()
 
     def stop(self) -> None:
         self.progress.stop_timer()
