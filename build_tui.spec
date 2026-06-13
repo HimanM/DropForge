@@ -40,6 +40,7 @@ hiddenimports = [
     "textual.widgets._static",
     "textual.widgets._tab_pane",
     "textual.widgets._tabbed_content",
+    "tui.windows_driver",
 ]
 
 a = Analysis(

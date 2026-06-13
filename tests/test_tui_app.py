@@ -33,6 +33,14 @@ class TUIApplicationTests(unittest.IsolatedAsyncioTestCase):
 
         call_next.assert_not_called()
 
+    def test_uses_no_alt_screen_driver_on_windows(self):
+        app = self.make_app()
+
+        with patch("tui.app.sys.platform", "win32"):
+            driver_class = app.get_driver_class()
+
+        self.assertEqual(driver_class.__name__, "NoAltScreenWindowsDriver")
+
     def test_refresh_login_ignores_missing_widgets_before_mount(self):
         state = TUIState()
         state.login.activation_url = "https://www.twitch.tv/activate"

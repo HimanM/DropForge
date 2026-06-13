@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import webbrowser
+import sys
 from collections import abc
 from typing import TypeVar
 
-from textual.app import App, ComposeResult, ScreenStackError
+from textual.app import App, ComposeResult, Driver, ScreenStackError
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.widget import Widget
@@ -124,6 +125,13 @@ class TwitchDropsTUI(App[None]):
         self._on_toggle_farm_unlinked = on_toggle_farm_unlinked
         self._on_ready = on_ready or (lambda: None)
         self._ready_for_refresh = False
+
+    def get_driver_class(self) -> type[Driver]:
+        if sys.platform == "win32":
+            from tui.windows_driver import NoAltScreenWindowsDriver
+
+            return NoAltScreenWindowsDriver
+        return super().get_driver_class()
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
