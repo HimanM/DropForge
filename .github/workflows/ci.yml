@@ -179,43 +179,6 @@ jobs:
           name: Twitch.Drops.Miner.MacOS
           path: Twitch.Drops.Miner.MacOS.zip
 
-  windows-tui:
-    name: Windows TUI
-    runs-on: windows-latest
-    needs:
-      - validate
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{env.PYTHON_VERSION}}
-
-      - name: Install TUI dependencies
-        run: |
-          python3 -m pip install -r requirements-tui.txt
-          python3 -m pip install pyinstaller
-
-      - name: Create tdminer executable
-        run: |
-          pyinstaller build_tui.spec --noconfirm
-
-      - name: Create TUI release archive
-        run: |
-          New-Item tdminer -ItemType Directory
-          Copy-Item dist\tdminer.exe tdminer\
-          Compress-Archive -Path tdminer -DestinationPath Twitch.Drops.Miner.TUI.Windows.zip
-
-      - name: Upload TUI build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          if-no-files-found: error
-          name: Twitch.Drops.Miner.TUI.Windows
-          path: Twitch.Drops.Miner.TUI.Windows.zip
-
   macos-tui:
     name: macOS TUI
     runs-on: macos-latest
@@ -446,7 +409,6 @@ jobs:
     if: github.event_name != 'pull_request'
     needs:
       - windows
-      - windows-tui
       - linux-pyinstaller
       - linux-appimage
       - linux-tui
@@ -483,6 +445,16 @@ jobs:
 
             - Build date: `${{steps.vars.outputs.date_now}}`
             - Reference commit: ${{github.sha}}
+
+            **Terminal UI install**
+
+            Linux/macOS:
+
+            ```sh
+            curl -fsSL https://raw.githubusercontent.com/HimanM/TwitchDropsMiner/main/scripts/install.sh | sh
+            ```
+
+            The `tdminer` TUI release binaries are self-contained and do not require users to install Python first. Native Termux on Android is not supported by these glibc Linux release assets.
           name: "Release v${{steps.vars.outputs.app_version}}"
           prerelease: false
           removeArtifacts: true

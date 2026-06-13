@@ -7,6 +7,19 @@ INSTALL_DIR="${TDMINER_INSTALL_DIR:-$HOME/.local/bin}"
 os="$(uname -s)"
 arch="$(uname -m)"
 
+if [ -n "${TERMUX_VERSION:-}" ] || [ -n "${ANDROID_ROOT:-}" ]; then
+  echo "Native Termux/Android is not supported by the tdminer release binaries." >&2
+  echo "Use a glibc Linux environment such as proot Ubuntu/Debian if you want to experiment." >&2
+  exit 1
+fi
+
+for command in curl unzip; do
+  if ! command -v "$command" >/dev/null 2>&1; then
+    echo "Missing required command: $command" >&2
+    exit 1
+  fi
+done
+
 case "$os" in
   Linux)
     case "$arch" in

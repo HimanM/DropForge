@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, TYPE_CHECKING
@@ -288,12 +287,22 @@ class TUIInventory:
             f"{drop.rewards_text()} - {drop.progress:.1%} ({drop.current_minutes}/{drop.required_minutes} min)"
             for drop in campaign.drops
         )
+        settings = self._twitch.settings
+        priority_only = settings.priority_mode is PriorityMode.PRIORITY_ONLY
+        game_name = campaign.game.name
         return CampaignSnapshot(
             id=campaign.id,
             name=campaign.name,
-            game=campaign.game.name,
+            game=game_name,
             status=self._campaign_status(campaign),
             linked=campaign.eligible,
+            active=campaign.active,
+            upcoming=campaign.upcoming,
+            expired=campaign.expired,
+            excluded=game_name in settings.exclude
+            or priority_only and game_name not in settings.priority,
+            finished=campaign.finished,
+            required_minutes=campaign.required_minutes,
             progress=campaign.progress,
             drops=drops,
             starts=str(campaign.starts_at.astimezone().replace(microsecond=0, tzinfo=None)),
@@ -339,6 +348,11 @@ class TUITray:
 
 class TUIManager:
     READY_TIMEOUT = 2.0
+    PRIORITY_MODE_LABELS = {
+        PriorityMode.PRIORITY_ONLY: "Priority list only",
+        PriorityMode.ENDING_SOONEST: "Ending soonest",
+        PriorityMode.LOW_AVBL_FIRST: "Low availability first",
+    }
 
     def __init__(self, twitch: Twitch) -> None:
         self._twitch = twitch
@@ -347,7 +361,6 @@ class TUIManager:
         self._app_ready = asyncio.Event()
         self._app: TwitchDropsTUI | None = None
         self._app_task: asyncio.Task[Any] | None = None
-        self._console_fallback = False
 
         self.status = TUIStatus(self)
         self.websockets = TUIWebsocketStatus(self)
@@ -368,13 +381,19 @@ class TUIManager:
         priority_mode = getattr(settings, "priority_mode", PriorityMode.PRIORITY_ONLY)
         self.state.priority = list(getattr(settings, "priority", []))
         self.state.exclude = sorted(getattr(settings, "exclude", []))
+        self.state.priority_mode = self.PRIORITY_MODE_LABELS.get(
+            priority_mode,
+            self.PRIORITY_MODE_LABELS[PriorityMode.PRIORITY_ONLY],
+        )
+        self.state.farm_unlinked = bool(getattr(settings, "farm_unlinked", False))
+        self.state.available_games = sorted(game.name for game in self._games)
         self.state.settings_text = "\n".join(
             [
                 f"Priority mode: {priority_mode}",
                 f"Priority games: {', '.join(self.state.priority) or '-'}",
                 f"Excluded games: {', '.join(self.state.exclude) or '-'}",
-                f"Farm unlinked drops: {getattr(settings, 'farm_unlinked', False)}",
-                f"Available games: {', '.join(sorted(game.name for game in self._games)) or '-'}",
+                f"Farm unlinked drops: {self.state.farm_unlinked}",
+                f"Available games: {len(self.state.available_games)}",
             ]
         )
         self.refresh_settings()
@@ -383,11 +402,6 @@ class TUIManager:
         if self._app_task is not None and not self._app_task.done():
             return
         self._app_ready.clear()
-        if sys.platform == "win32":
-            self._app = None
-            self._start_console_fallback()
-            self._app_ready.set()
-            return
         self._app = TwitchDropsTUI(
             self.state,
             on_close=self.close,
@@ -395,8 +409,13 @@ class TUIManager:
             login_confirm=self.login.confirm,
             on_switch=self._switch_channel,
             on_save_settings=self._save_settings,
-            on_cycle_priority_mode=self._cycle_priority_mode,
-            on_toggle_farm_unlinked=self._toggle_farm_unlinked,
+            on_add_priority_game=self._add_priority_game,
+            on_add_exclude_game=self._add_exclude_game,
+            on_remove_priority_game=self._remove_priority_game,
+            on_remove_exclude_game=self._remove_exclude_game,
+            on_move_priority_game=self._move_priority_game,
+            on_set_priority_mode=self._set_priority_mode,
+            on_set_farm_unlinked=self._set_farm_unlinked,
             on_ready=self._mark_app_ready,
         )
         self._app_task = asyncio.create_task(self._app.run_async())
@@ -404,25 +423,6 @@ class TUIManager:
     def _mark_app_ready(self) -> None:
         logger.info("Terminal UI ready.")
         self._app_ready.set()
-
-    def _write_console(self, line: str = "") -> None:
-        try:
-            sys.__stdout__.write(f"{line}\n")
-            sys.__stdout__.flush()
-        except Exception:
-            pass
-
-    def _start_console_fallback(self) -> None:
-        if self._console_fallback:
-            return
-        self._console_fallback = True
-        self._write_console()
-        self._write_console("Twitch Drops Miner")
-        self._write_console("Textual UI could not start in this Windows console.")
-        self._write_console("Running in console fallback mode. Press Ctrl+C to stop.")
-        self._write_console()
-        for line in self.state.logs[-20:]:
-            self._write_console(line)
 
     async def wait_until_ready(self) -> None:
         if self._app is None or self._app_ready.is_set():
@@ -433,7 +433,6 @@ class TUIManager:
             logger.warning("Terminal UI did not report ready before startup timeout.")
             if self._app is not None and self._app.is_running:
                 self._app.exit()
-            self._start_console_fallback()
             self._app_ready.set()
 
     def stop(self) -> None:
@@ -493,8 +492,6 @@ class TUIManager:
             message = message.replace("\n", f"\n{stamp}: ")
         line = f"{stamp}: {message}"
         self.state.add_log(line)
-        if self._console_fallback:
-            self._write_console(line)
         if self._app is not None:
             self._app.append_log_later(line)
 
@@ -545,20 +542,54 @@ class TUIManager:
         self._update_settings_text()
         self.print("Settings lists saved. Reload inventory to apply changes.")
 
-    def _cycle_priority_mode(self) -> None:
-        modes = list(PriorityMode)
-        current = self._twitch.settings.priority_mode
-        next_mode = modes[(modes.index(current) + 1) % len(modes)]
-        self._twitch.settings.priority_mode = next_mode
+    def _save_settings_update(self, message: str) -> None:
         self._twitch.settings.save()
         self._update_settings_text()
-        self.print(f"Priority mode changed to {next_mode}. Reload inventory to apply changes.")
+        self.print(f"{message} Reload inventory to apply changes.")
 
-    def _toggle_farm_unlinked(self) -> None:
-        self._twitch.settings.farm_unlinked = not self._twitch.settings.farm_unlinked
-        self._twitch.settings.save()
-        self._update_settings_text()
-        self.print(
-            f"Farm unlinked drops set to {self._twitch.settings.farm_unlinked}. "
-            "Reload inventory to apply changes."
-        )
+    def _add_priority_game(self, game_name: str) -> None:
+        if game_name and game_name not in self._twitch.settings.priority:
+            self._twitch.settings.priority.append(game_name)
+            self._save_settings_update(f"Added {game_name} to priority.")
+
+    def _add_exclude_game(self, game_name: str) -> None:
+        if game_name and game_name not in self._twitch.settings.exclude:
+            self._twitch.settings.exclude.add(game_name)
+            self._save_settings_update(f"Added {game_name} to exclude.")
+
+    def _remove_priority_game(self, game_name: str) -> None:
+        if game_name in self._twitch.settings.priority:
+            self._twitch.settings.priority.remove(game_name)
+            self._save_settings_update(f"Removed {game_name} from priority.")
+
+    def _remove_exclude_game(self, game_name: str) -> None:
+        if game_name in self._twitch.settings.exclude:
+            self._twitch.settings.exclude.discard(game_name)
+            self._save_settings_update(f"Removed {game_name} from exclude.")
+
+    def _move_priority_game(self, game_name: str, offset: int) -> None:
+        priority = self._twitch.settings.priority
+        if game_name not in priority:
+            return
+        old_idx = priority.index(game_name)
+        new_idx = max(0, min(len(priority) - 1, old_idx + offset))
+        if old_idx == new_idx:
+            return
+        priority.pop(old_idx)
+        priority.insert(new_idx, game_name)
+        self._save_settings_update(f"Moved {game_name}.")
+
+    def _set_priority_mode(self, mode_name: str) -> None:
+        for mode, label in self.PRIORITY_MODE_LABELS.items():
+            if label == mode_name:
+                self._twitch.settings.priority_mode = mode
+                if mode is not PriorityMode.PRIORITY_ONLY:
+                    self._twitch.settings.farm_unlinked = False
+                self._save_settings_update(f"Priority mode changed to {label}.")
+                return
+
+    def _set_farm_unlinked(self, enabled: bool) -> None:
+        if self._twitch.settings.priority_mode is not PriorityMode.PRIORITY_ONLY:
+            enabled = False
+        self._twitch.settings.farm_unlinked = enabled
+        self._save_settings_update(f"Farm unlinked drops set to {enabled}.")

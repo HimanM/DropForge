@@ -34,12 +34,27 @@ class DropSnapshot:
 
 
 @dataclass(slots=True)
+class CampaignFilters:
+    show_not_linked: bool = True
+    show_upcoming: bool = True
+    show_expired: bool = False
+    show_excluded: bool = False
+    show_finished: bool = False
+
+
+@dataclass(slots=True)
 class CampaignSnapshot:
     id: str
     name: str
     game: str
     status: str
     linked: bool
+    active: bool
+    upcoming: bool
+    expired: bool
+    excluded: bool
+    finished: bool
+    required_minutes: int
     progress: float
     drops: tuple[str, ...]
     starts: str
@@ -96,6 +111,10 @@ class TUIState:
     settings_text: str = ""
     priority: list[str] = field(default_factory=list)
     exclude: list[str] = field(default_factory=list)
+    available_games: list[str] = field(default_factory=list)
+    priority_mode: str = "Priority list only"
+    farm_unlinked: bool = False
+    campaign_filters: CampaignFilters = field(default_factory=CampaignFilters)
     login: LoginSnapshot = field(default_factory=LoginSnapshot)
     current_drop: DropSnapshot = field(default_factory=DropSnapshot)
     channels: dict[str, ChannelSnapshot] = field(default_factory=dict)

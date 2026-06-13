@@ -113,10 +113,8 @@ async def run_client(settings: Settings) -> int:
     configure_logging(settings)
     client = Twitch(settings, gui_factory=TUIManager)
     loop = asyncio.get_running_loop()
-    supports_signals = sys.platform != "win32"
-    if supports_signals:
-        loop.add_signal_handler(signal.SIGINT, lambda *_: client.gui.close())
-        loop.add_signal_handler(signal.SIGTERM, lambda *_: client.gui.close())
+    loop.add_signal_handler(signal.SIGINT, lambda *_: client.gui.close())
+    loop.add_signal_handler(signal.SIGTERM, lambda *_: client.gui.close())
 
     exit_status = 0
     try:
@@ -131,9 +129,8 @@ async def run_client(settings: Settings) -> int:
         client.print("Fatal error encountered:")
         client.print(traceback.format_exc())
     finally:
-        if supports_signals:
-            loop.remove_signal_handler(signal.SIGINT)
-            loop.remove_signal_handler(signal.SIGTERM)
+        loop.remove_signal_handler(signal.SIGINT)
+        loop.remove_signal_handler(signal.SIGTERM)
         client.print(_("gui", "status", "exiting"))
         await client.shutdown()
 
@@ -151,6 +148,10 @@ async def run_client(settings: Settings) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if sys.platform == "win32":
+        raise SystemExit(
+            "tdminer TUI is only supported on Linux and macOS. Use the GUI build on Windows."
+        )
     if truststore is not None:
         truststore.inject_into_ssl()
     warnings.simplefilter("default", ResourceWarning)

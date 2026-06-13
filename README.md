@@ -30,18 +30,12 @@ Every several seconds, the application pretends to watch a particular stream by 
 
 ### Terminal UI (`tdminer`):
 
-This fork also ships a Textual-based terminal UI for users who want a keyboard-friendly app that can run over SSH or on a headless Linux box. It keeps the regular GUI build intact.
+This fork also ships a Textual-based terminal UI for users who want a keyboard-friendly app that can run over SSH or on a headless Linux/macOS box. It keeps the regular GUI build intact. The TUI is not shipped for Windows; use the regular GUI build there.
 
 Install the latest TUI release on Linux or macOS:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/HimanM/TwitchDropsMiner/main/scripts/install.sh | sh
-```
-
-Install the latest TUI release on Windows PowerShell:
-
-```powershell
-irm https://raw.githubusercontent.com/HimanM/TwitchDropsMiner/main/scripts/install.ps1 | iex
 ```
 
 Run it after installing:
@@ -60,7 +54,9 @@ Useful TUI shortcuts:
 - `b` opens the Twitch login URL when a device-code login is pending.
 - `c` copies the Twitch login URL when a device-code login is pending.
 
-The release workflow builds and publishes separate TUI assets for Windows, macOS, Linux x86_64, and Linux aarch64. The install scripts always fetch the latest matching `tdminer` asset from GitHub Releases.
+The release workflow builds and publishes separate TUI assets for macOS, Linux x86_64, and Linux aarch64. The install script always fetches the latest matching `tdminer` asset from GitHub Releases.
+
+The release binaries are self-contained PyInstaller executables, so users do not need to install Python or Python packages first. Native Termux on Android is not supported by the release installer because Termux does not use glibc Linux binaries. Advanced users may be able to run it inside a proot Ubuntu/Debian environment, but native mobile support is not a release target yet.
 
 ### Pictures:
 

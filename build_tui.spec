@@ -28,7 +28,6 @@ hiddenimports = [
     "textual.drivers.headless_driver",
     "textual.drivers.linux_driver",
     "textual.drivers.linux_inline_driver",
-    "textual.drivers.windows_driver",
     "textual.widgets._button",
     "textual.widgets._data_table",
     "textual.widgets._footer",
@@ -40,7 +39,6 @@ hiddenimports = [
     "textual.widgets._static",
     "textual.widgets._tab_pane",
     "textual.widgets._tabbed_content",
-    "tui.windows_driver",
 ]
 
 a = Analysis(

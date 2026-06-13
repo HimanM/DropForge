@@ -4,7 +4,7 @@ from unittest.mock import PropertyMock, patch
 
 from tui.app import TwitchDropsTUI
 from tui.manager import TUIManager
-from tui.state import DropSnapshot, TUIState
+from tui.state import CampaignSnapshot, DropSnapshot, TUIState
 
 
 class TUIApplicationTests(unittest.IsolatedAsyncioTestCase):
@@ -16,8 +16,13 @@ class TUIApplicationTests(unittest.IsolatedAsyncioTestCase):
             login_confirm=lambda: None,
             on_switch=lambda: None,
             on_save_settings=lambda priority, exclude: None,
-            on_cycle_priority_mode=lambda: None,
-            on_toggle_farm_unlinked=lambda: None,
+            on_add_priority_game=lambda game: None,
+            on_add_exclude_game=lambda game: None,
+            on_remove_priority_game=lambda game: None,
+            on_remove_exclude_game=lambda game: None,
+            on_move_priority_game=lambda game, offset: None,
+            on_set_priority_mode=lambda mode: None,
+            on_set_farm_unlinked=lambda enabled: None,
             on_ready=on_ready,
         )
 
@@ -32,14 +37,6 @@ class TUIApplicationTests(unittest.IsolatedAsyncioTestCase):
             app.refresh_status_later()
 
         call_next.assert_not_called()
-
-    def test_uses_no_alt_screen_driver_on_windows(self):
-        app = self.make_app()
-
-        with patch("tui.app.sys.platform", "win32"):
-            driver_class = app.get_driver_class()
-
-        self.assertEqual(driver_class.__name__, "NoAltScreenWindowsDriver")
 
     def test_refresh_login_ignores_missing_widgets_before_mount(self):
         state = TUIState()
@@ -90,25 +87,91 @@ class TUIApplicationTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(app.query_one("#channels-table").is_mounted)
             self.assertTrue(app.query_one("#campaigns-table").is_mounted)
 
+    async def test_login_actions_only_show_for_pending_device_login(self):
+        state = TUIState()
+        app = self.make_app(state)
+
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            self.assertFalse(app.query_one("#login-actions").display)
+
+            state.login.activation_url = "https://www.twitch.tv/activate"
+            state.login.user_code = "ABCD-EFGH"
+            app.refresh_login()
+            await pilot.pause()
+
+            self.assertTrue(app.query_one("#login-actions").display)
+
+    async def test_campaign_filters_hide_expired_by_default(self):
+        state = TUIState()
+        state.campaigns["active"] = CampaignSnapshot(
+            id="active",
+            name="Active Campaign",
+            game="Game",
+            status="Active",
+            linked=True,
+            active=True,
+            upcoming=False,
+            expired=False,
+            excluded=False,
+            finished=False,
+            required_minutes=60,
+            progress=0.5,
+            drops=("Reward",),
+            starts="-",
+            ends="-",
+            allowed_channels="-",
+        )
+        state.campaigns["expired"] = CampaignSnapshot(
+            id="expired",
+            name="Expired Campaign",
+            game="Game",
+            status="Expired",
+            linked=True,
+            active=False,
+            upcoming=False,
+            expired=True,
+            excluded=False,
+            finished=False,
+            required_minutes=60,
+            progress=1.0,
+            drops=("Reward",),
+            starts="-",
+            ends="-",
+            allowed_channels="-",
+        )
+        app = self.make_app(state)
+
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            table = app.query_one("#campaigns-table")
+            self.assertEqual(table.row_count, 1)
+
+            state.campaign_filters.show_expired = True
+            app.refresh_campaigns()
+            await pilot.pause()
+
+            self.assertEqual(table.row_count, 2)
+
+    async def test_settings_use_compact_selects_tables_and_checkbox(self):
+        state = TUIState()
+        state.available_games = ["Game A", "Game B"]
+        state.priority = ["Game A"]
+        state.exclude = ["Game B"]
+        state.farm_unlinked = True
+        app = self.make_app(state)
+
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+
+            self.assertTrue(app.query_one("#game-select").is_mounted)
+            self.assertTrue(app.query_one("#priority-mode-select").is_mounted)
+            self.assertTrue(app.query_one("#farm-unlinked").is_mounted)
+            self.assertEqual(app.query_one("#priority-table").row_count, 1)
+            self.assertEqual(app.query_one("#exclude-table").row_count, 1)
+
 
 class TUIManagerTests(unittest.IsolatedAsyncioTestCase):
-    def test_start_uses_console_fallback_on_windows(self):
-        twitch = SimpleNamespace(
-            settings=SimpleNamespace(priority=[], exclude=set(), farm_unlinked=False)
-        )
-        manager = TUIManager(twitch)
-
-        with (
-            patch("tui.manager.sys.platform", "win32"),
-            patch.object(manager, "_write_console") as write_console,
-        ):
-            manager.start()
-
-        self.assertTrue(manager._console_fallback)
-        self.assertTrue(manager._app_ready.is_set())
-        self.assertIsNone(manager._app)
-        write_console.assert_called()
-
     async def test_wait_until_ready_has_timeout_fallback(self):
         twitch = SimpleNamespace(
             settings=SimpleNamespace(priority=[], exclude=set(), farm_unlinked=False)
@@ -119,14 +182,11 @@ class TUIManagerTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch.object(manager, "READY_TIMEOUT", 0.01),
-            patch.object(manager, "_write_console") as write_console,
         ):
             await manager.wait_until_ready()
 
         self.assertTrue(manager._app_ready.is_set())
-        self.assertTrue(manager._console_fallback)
         self.assertEqual(exits, ["exit"])
-        write_console.assert_called()
 
 
 if __name__ == "__main__":

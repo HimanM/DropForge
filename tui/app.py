@@ -1,19 +1,18 @@
 from __future__ import annotations
 
 import webbrowser
-import sys
 from collections import abc
-from typing import TypeVar
+from typing import Any, TypeVar
 
-from textual.app import App, ComposeResult, Driver, ScreenStackError
-from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.app import App, ComposeResult, ScreenStackError
+from textual.containers import Horizontal, Vertical
 from textual.css.query import NoMatches
 from textual.widget import Widget
+from textual.widgets import Checkbox, Select
 from textual.widgets._button import Button
 from textual.widgets._data_table import DataTable
 from textual.widgets._footer import Footer
 from textual.widgets._header import Header
-from textual.widgets._input import Input
 from textual.widgets._label import Label
 from textual.widgets._log import Log
 from textual.widgets._progress_bar import ProgressBar
@@ -28,6 +27,12 @@ _WidgetT = TypeVar("_WidgetT", bound=Widget)
 
 
 class TwitchDropsTUI(App[None]):
+    PRIORITY_MODE_OPTIONS = (
+        ("Priority list only", "Priority list only"),
+        ("Ending soonest", "Ending soonest"),
+        ("Low availability first", "Low availability first"),
+    )
+
     CSS = """
     Screen {
         layout: vertical;
@@ -39,6 +44,10 @@ class TwitchDropsTUI(App[None]):
 
     #summary-row {
         height: auto;
+    }
+
+    #settings-grid {
+        height: 1fr;
     }
 
     .panel {
@@ -58,6 +67,24 @@ class TwitchDropsTUI(App[None]):
 
     #progress-panel {
         min-width: 38;
+    }
+
+    .compact-panel {
+        border: round $surface;
+        padding: 0 1;
+        margin: 0 1 1 0;
+        min-width: 22;
+    }
+
+    .filter-strip,
+    .action-row {
+        height: auto;
+        margin-bottom: 1;
+    }
+
+    .action-row Button,
+    .filter-strip Checkbox {
+        margin-right: 1;
     }
 
     #drop-bar,
@@ -84,7 +111,14 @@ class TwitchDropsTUI(App[None]):
         margin-right: 1;
     }
 
-    Input {
+    Button {
+        min-width: 7;
+        width: auto;
+        height: 1;
+        padding: 0 1;
+    }
+
+    Select {
         margin-bottom: 1;
     }
 
@@ -99,6 +133,8 @@ class TwitchDropsTUI(App[None]):
         ("s", "switch_channel", "Switch"),
         ("b", "open_browser", "Open Browser"),
         ("c", "copy_login_url", "Copy Login URL"),
+        ("p", "add_priority", "Priority"),
+        ("x", "add_exclude", "Exclude"),
     ]
 
     def __init__(
@@ -110,8 +146,13 @@ class TwitchDropsTUI(App[None]):
         login_confirm: asyncio_event_setter,
         on_switch: abc.Callable[[], None],
         on_save_settings: abc.Callable[[str, str], None],
-        on_cycle_priority_mode: abc.Callable[[], None],
-        on_toggle_farm_unlinked: abc.Callable[[], None],
+        on_add_priority_game: abc.Callable[[str], None],
+        on_add_exclude_game: abc.Callable[[str], None],
+        on_remove_priority_game: abc.Callable[[str], None],
+        on_remove_exclude_game: abc.Callable[[str], None],
+        on_move_priority_game: abc.Callable[[str, int], None],
+        on_set_priority_mode: abc.Callable[[str], None],
+        on_set_farm_unlinked: abc.Callable[[bool], None],
         on_ready: abc.Callable[[], None] | None = None,
     ) -> None:
         super().__init__()
@@ -121,17 +162,16 @@ class TwitchDropsTUI(App[None]):
         self._login_confirm = login_confirm
         self._on_switch = on_switch
         self._on_save_settings = on_save_settings
-        self._on_cycle_priority_mode = on_cycle_priority_mode
-        self._on_toggle_farm_unlinked = on_toggle_farm_unlinked
+        self._on_add_priority_game = on_add_priority_game
+        self._on_add_exclude_game = on_add_exclude_game
+        self._on_remove_priority_game = on_remove_priority_game
+        self._on_remove_exclude_game = on_remove_exclude_game
+        self._on_move_priority_game = on_move_priority_game
+        self._on_set_priority_mode = on_set_priority_mode
+        self._on_set_farm_unlinked = on_set_farm_unlinked
         self._on_ready = on_ready or (lambda: None)
         self._ready_for_refresh = False
-
-    def get_driver_class(self) -> type[Driver]:
-        if sys.platform == "win32":
-            from tui.windows_driver import NoAltScreenWindowsDriver
-
-            return NoAltScreenWindowsDriver
-        return super().get_driver_class()
+        self._syncing_settings = False
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -146,9 +186,8 @@ class TwitchDropsTUI(App[None]):
                             yield Static("", id="login-text")
                             yield Static("", id="login-url")
                             with Horizontal(id="login-actions"):
-                                yield Button("Open browser", id="open-browser")
-                                yield Button("Copy URL", id="copy-url")
-                                yield Button("Continue", id="login-continue")
+                                yield Button("open", id="open-browser")
+                                yield Button("copy", id="copy-url")
                         with Vertical(id="progress-panel", classes="panel grow"):
                             yield Label("Current drop")
                             yield Static("", id="drop-title")
@@ -159,21 +198,50 @@ class TwitchDropsTUI(App[None]):
                             yield ProgressBar(total=100, id="campaign-bar")
                     yield Log(id="dashboard-log", highlight=True)
             with TabPane("Campaigns", id="campaigns-tab"):
-                yield DataTable(id="campaigns-table")
+                with Vertical(id="campaigns"):
+                    with Horizontal(classes="filter-strip"):
+                        yield Static("show:")
+                        yield Checkbox("not linked", id="filter-not-linked", compact=True)
+                        yield Checkbox("upcoming", id="filter-upcoming", compact=True)
+                        yield Checkbox("expired", id="filter-expired", compact=True)
+                        yield Checkbox("excluded", id="filter-excluded", compact=True)
+                        yield Checkbox("finished", id="filter-finished", compact=True)
+                    yield DataTable(id="campaigns-table")
             with TabPane("Channels", id="channels-tab"):
                 yield DataTable(id="channels-table")
             with TabPane("Settings", id="settings-tab"):
-                with VerticalScroll(classes="panel"):
+                with Vertical(id="settings"):
                     yield Static("", id="settings-text")
-                    yield Label("Priority games, comma-separated")
-                    yield Input(placeholder="Game one, Game two", id="priority-input")
-                    yield Label("Excluded games, comma-separated")
-                    yield Input(placeholder="Game one, Game two", id="exclude-input")
-                    with Horizontal(id="settings-actions"):
-                        yield Button("Save lists", id="save-settings")
-                        yield Button("Cycle priority mode", id="cycle-priority")
-                        yield Button("Toggle farm unlinked", id="toggle-farm-unlinked")
-                    yield Button("Reload inventory", id="reload")
+                    with Horizontal(id="settings-grid"):
+                        with Vertical(classes="compact-panel grow"):
+                            yield Label("Mode")
+                            yield Select([], prompt="Priority mode", id="priority-mode-select")
+                            yield Checkbox(
+                                "farm unlinked drops",
+                                id="farm-unlinked",
+                                compact=True,
+                            )
+                            yield Static(
+                                "farm unlinked works only with priority-only mode",
+                                id="farm-unlinked-note",
+                            )
+                            yield Label("Available game")
+                            yield Select([], prompt="Select game", id="game-select")
+                            with Horizontal(classes="action-row"):
+                                yield Button("+ priority", id="add-priority")
+                                yield Button("+ exclude", id="add-exclude")
+                            yield Button("reload", id="reload")
+                        with Vertical(classes="compact-panel grow"):
+                            yield Label("Priority")
+                            yield DataTable(id="priority-table")
+                            with Horizontal(classes="action-row"):
+                                yield Button("up", id="priority-up")
+                                yield Button("down", id="priority-down")
+                                yield Button("remove", id="remove-priority")
+                        with Vertical(classes="compact-panel grow"):
+                            yield Label("Exclude")
+                            yield DataTable(id="exclude-table")
+                            yield Button("remove", id="remove-exclude")
             with TabPane("Logs", id="logs-tab"):
                 yield Log(id="full-log", highlight=True)
         yield Footer()
@@ -199,6 +267,14 @@ class TwitchDropsTUI(App[None]):
         channels.zebra_stripes = True
         channels.cursor_type = "row"
         channels.add_columns("Channel", "Status", "Game", "Drops", "Viewers", "ACL")
+
+        priority = self.query_one("#priority-table", DataTable)
+        priority.cursor_type = "row"
+        priority.add_columns("#", "Game")
+
+        exclude = self.query_one("#exclude-table", DataTable)
+        exclude.cursor_type = "row"
+        exclude.add_columns("Game")
 
     def _refresh_later(self, callback: abc.Callable[[], None]) -> None:
         if self.is_running and self._ready_for_refresh:
@@ -269,6 +345,9 @@ class TwitchDropsTUI(App[None]):
                 login_url.update(f"URL: {login.activation_url}\nCode: {login.user_code}")
             else:
                 login_url.update("")
+        actions = self._widget("#login-actions", Horizontal)
+        if actions is not None:
+            actions.display = bool(login.activation_url)
 
     def refresh_progress(self) -> None:
         drop = self.state.current_drop
@@ -303,7 +382,10 @@ class TwitchDropsTUI(App[None]):
         if table is None:
             return
         table.clear()
+        filters = self.state.campaign_filters
         for campaign in self.state.campaigns.values():
+            if not self._campaign_visible(campaign):
+                continue
             table.add_row(
                 campaign.game,
                 campaign.name,
@@ -313,18 +395,75 @@ class TwitchDropsTUI(App[None]):
                 "\n".join(campaign.drops),
                 key=campaign.id,
             )
+        self._syncing_settings = True
+        try:
+            self._set_checkbox("#filter-not-linked", filters.show_not_linked)
+            self._set_checkbox("#filter-upcoming", filters.show_upcoming)
+            self._set_checkbox("#filter-expired", filters.show_expired)
+            self._set_checkbox("#filter-excluded", filters.show_excluded)
+            self._set_checkbox("#filter-finished", filters.show_finished)
+        finally:
+            self._syncing_settings = False
+
+    def _campaign_visible(self, campaign: Any) -> bool:
+        filters = self.state.campaign_filters
+        if campaign.required_minutes <= 0:
+            return False
+        if not filters.show_not_linked and not campaign.linked:
+            return False
+        if campaign.upcoming and not filters.show_upcoming:
+            return False
+        if campaign.expired and not filters.show_expired:
+            return False
+        if campaign.excluded and not filters.show_excluded:
+            return False
+        if campaign.finished and not filters.show_finished:
+            return False
+        return campaign.active or campaign.upcoming or campaign.expired
 
     def refresh_settings(self, *, sync_inputs: bool = False) -> None:
         settings = self._widget("#settings-text", Static)
         if settings is not None:
             settings.update(self.state.settings_text)
         if sync_inputs:
-            priority = self._widget("#priority-input", Input)
-            exclude = self._widget("#exclude-input", Input)
-            if priority is not None:
-                priority.value = ", ".join(self.state.priority)
-            if exclude is not None:
-                exclude.value = ", ".join(self.state.exclude)
+            self._syncing_settings = True
+            try:
+                self._sync_settings_widgets()
+            finally:
+                self._syncing_settings = False
+
+    def _sync_settings_widgets(self) -> None:
+        mode = self._widget("#priority-mode-select", Select)
+        if mode is not None:
+            mode.set_options(self.PRIORITY_MODE_OPTIONS)
+            mode.value = self.state.priority_mode
+
+        farm_unlinked = self._widget("#farm-unlinked", Checkbox)
+        if farm_unlinked is not None:
+            farm_unlinked.value = self.state.farm_unlinked
+            farm_unlinked.disabled = self.state.priority_mode != "Priority list only"
+
+        game_select = self._widget("#game-select", Select)
+        if game_select is not None:
+            options = [(game, game) for game in self.state.available_games]
+            game_select.set_options(options)
+
+        priority = self._widget("#priority-table", DataTable)
+        if priority is not None:
+            priority.clear()
+            for idx, game in enumerate(self.state.priority, start=1):
+                priority.add_row(str(idx), game, key=game)
+
+        exclude = self._widget("#exclude-table", DataTable)
+        if exclude is not None:
+            exclude.clear()
+            for game in self.state.exclude:
+                exclude.add_row(game, key=game)
+
+    def _set_checkbox(self, selector: str, value: bool) -> None:
+        checkbox = self._widget(selector, Checkbox)
+        if checkbox is not None and checkbox.value != value:
+            checkbox.value = value
 
     def selected_channel_id(self) -> str | None:
         table = self._widget("#channels-table", DataTable)
@@ -355,6 +494,16 @@ class TwitchDropsTUI(App[None]):
     def action_copy_login_url(self) -> None:
         self.copy_activation_url()
 
+    def action_add_priority(self) -> None:
+        game = self._selected_game()
+        if game:
+            self._on_add_priority_game(game)
+
+    def action_add_exclude(self) -> None:
+        game = self._selected_game()
+        if game:
+            self._on_add_exclude_game(game)
+
     def open_activation_url(self) -> None:
         url = self.state.login.activation_url
         if url:
@@ -373,19 +522,74 @@ class TwitchDropsTUI(App[None]):
             self.open_activation_url()
         elif button_id == "copy-url":
             self.copy_activation_url()
-        elif button_id == "login-continue":
-            self._login_confirm()
         elif button_id == "reload":
             self._on_reload()
-        elif button_id == "save-settings":
-            self._on_save_settings(
-                self.query_one("#priority-input", Input).value,
-                self.query_one("#exclude-input", Input).value,
-            )
-        elif button_id == "cycle-priority":
-            self._on_cycle_priority_mode()
-        elif button_id == "toggle-farm-unlinked":
-            self._on_toggle_farm_unlinked()
+        elif button_id == "add-priority":
+            self.action_add_priority()
+        elif button_id == "add-exclude":
+            self.action_add_exclude()
+        elif button_id == "remove-priority":
+            game = self._selected_table_key("#priority-table")
+            if game:
+                self._on_remove_priority_game(game)
+        elif button_id == "remove-exclude":
+            game = self._selected_table_key("#exclude-table")
+            if game:
+                self._on_remove_exclude_game(game)
+        elif button_id == "priority-up":
+            game = self._selected_table_key("#priority-table")
+            if game:
+                self._on_move_priority_game(game, -1)
+        elif button_id == "priority-down":
+            game = self._selected_table_key("#priority-table")
+            if game:
+                self._on_move_priority_game(game, 1)
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if self._syncing_settings:
+            return
+        if event.select.id == "priority-mode-select" and event.value != Select.NULL:
+            self._on_set_priority_mode(str(event.value))
+
+    def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
+        if self._syncing_settings:
+            return
+        checkbox_id = event.checkbox.id
+        if checkbox_id == "farm-unlinked":
+            self._on_set_farm_unlinked(event.value)
+            return
+        filters = self.state.campaign_filters
+        if checkbox_id == "filter-not-linked":
+            filters.show_not_linked = event.value
+        elif checkbox_id == "filter-upcoming":
+            filters.show_upcoming = event.value
+        elif checkbox_id == "filter-expired":
+            filters.show_expired = event.value
+        elif checkbox_id == "filter-excluded":
+            filters.show_excluded = event.value
+        elif checkbox_id == "filter-finished":
+            filters.show_finished = event.value
+        else:
+            return
+        self.refresh_campaigns()
+
+    def _selected_game(self) -> str | None:
+        select = self._widget("#game-select", Select)
+        if select is None or select.value == Select.NULL:
+            return None
+        return str(select.value)
+
+    def _selected_table_key(self, selector: str) -> str | None:
+        table = self._widget(selector, DataTable)
+        if table is None or table.row_count == 0 or table.cursor_row < 0:
+            return None
+        try:
+            row_key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key
+        except Exception:
+            return None
+        if row_key is None:
+            return None
+        return str(row_key.value)
 
 
 asyncio_event_setter = abc.Callable[[], None]
