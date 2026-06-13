@@ -5,6 +5,23 @@ from tui.state import DropSnapshot, TUIState
 
 
 class TUIApplicationTests(unittest.IsolatedAsyncioTestCase):
+    def test_refresh_login_ignores_missing_widgets_before_mount(self):
+        state = TUIState()
+        state.login.activation_url = "https://www.twitch.tv/activate"
+        state.login.user_code = "ABCD-EFGH"
+        app = TwitchDropsTUI(
+            state,
+            on_close=lambda: None,
+            on_reload=lambda: None,
+            login_confirm=lambda: None,
+            on_switch=lambda: None,
+            on_save_settings=lambda priority, exclude: None,
+            on_cycle_priority_mode=lambda: None,
+            on_toggle_farm_unlinked=lambda: None,
+        )
+
+        app.refresh_login()
+
     async def test_app_mounts_and_updates_progress_bars(self):
         state = TUIState()
         state.set_drop(

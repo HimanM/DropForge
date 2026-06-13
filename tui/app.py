@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import webbrowser
 from collections import abc
+from typing import TypeVar
 
-from textual.app import App, ComposeResult
+from textual.app import App, ComposeResult, ScreenStackError
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.css.query import NoMatches
+from textual.widget import Widget
 from textual.widgets._button import Button
 from textual.widgets._data_table import DataTable
 from textual.widgets._footer import Footer
@@ -18,6 +21,9 @@ from textual.widgets._tabbed_content import TabbedContent, TabPane
 
 from core.constants import State
 from tui.state import TUIState, clamp_progress
+
+
+_WidgetT = TypeVar("_WidgetT", bound=Widget)
 
 
 class TwitchDropsTUI(App[None]):
@@ -181,6 +187,12 @@ class TwitchDropsTUI(App[None]):
         if self.is_running and self.is_mounted:
             self.call_next(callback)
 
+    def _widget(self, selector: str, widget_type: type[_WidgetT]) -> _WidgetT | None:
+        try:
+            return self.query_one(selector, widget_type)
+        except (NoMatches, ScreenStackError):
+            return None
+
     def refresh_all(self) -> None:
         self.refresh_status()
         self.refresh_login()
@@ -213,46 +225,56 @@ class TwitchDropsTUI(App[None]):
             self.call_next(lambda: self.append_log(line))
 
     def append_log(self, line: str) -> None:
-        self.query_one("#dashboard-log", Log).write_line(line)
-        self.query_one("#full-log", Log).write_line(line)
+        dashboard_log = self._widget("#dashboard-log", Log)
+        full_log = self._widget("#full-log", Log)
+        if dashboard_log is not None:
+            dashboard_log.write_line(line)
+        if full_log is not None:
+            full_log.write_line(line)
 
     def refresh_logs(self) -> None:
         for line in self.state.logs[-100:]:
             self.append_log(line)
 
     def refresh_status(self) -> None:
-        self.query_one("#status-text", Static).update(
-            f"{self.state.status}\nMode: {self.state.icon_state}"
-        )
+        status = self._widget("#status-text", Static)
+        if status is not None:
+            status.update(f"{self.state.status}\nMode: {self.state.icon_state}")
 
     def refresh_login(self) -> None:
         login = self.state.login
-        self.query_one("#login-text", Static).update(f"{login.status}\nUser: {login.user_id}")
-        if login.activation_url:
-            self.query_one("#login-url", Static).update(
-                f"URL: {login.activation_url}\nCode: {login.user_code}"
-            )
-        else:
-            self.query_one("#login-url", Static).update("")
+        login_text = self._widget("#login-text", Static)
+        login_url = self._widget("#login-url", Static)
+        if login_text is not None:
+            login_text.update(f"{login.status}\nUser: {login.user_id}")
+        if login_url is not None:
+            if login.activation_url:
+                login_url.update(f"URL: {login.activation_url}\nCode: {login.user_code}")
+            else:
+                login_url.update("")
 
     def refresh_progress(self) -> None:
         drop = self.state.current_drop
-        self.query_one("#drop-title", Static).update(
-            f"{drop.game}\n{drop.rewards} ({drop.drop_percent})"
-        )
-        self.query_one("#drop-remaining", Static).update(f"Remaining: {drop.remaining}")
-        self.query_one("#drop-bar", ProgressBar).update(
-            progress=clamp_progress(drop.drop_progress) * 100
-        )
-        self.query_one("#campaign-title", Static).update(
-            f"{drop.campaign} ({drop.campaign_percent})"
-        )
-        self.query_one("#campaign-bar", ProgressBar).update(
-            progress=clamp_progress(drop.campaign_progress) * 100
-        )
+        drop_title = self._widget("#drop-title", Static)
+        drop_remaining = self._widget("#drop-remaining", Static)
+        drop_bar = self._widget("#drop-bar", ProgressBar)
+        campaign_title = self._widget("#campaign-title", Static)
+        campaign_bar = self._widget("#campaign-bar", ProgressBar)
+        if drop_title is not None:
+            drop_title.update(f"{drop.game}\n{drop.rewards} ({drop.drop_percent})")
+        if drop_remaining is not None:
+            drop_remaining.update(f"Remaining: {drop.remaining}")
+        if drop_bar is not None:
+            drop_bar.update(progress=clamp_progress(drop.drop_progress) * 100)
+        if campaign_title is not None:
+            campaign_title.update(f"{drop.campaign} ({drop.campaign_percent})")
+        if campaign_bar is not None:
+            campaign_bar.update(progress=clamp_progress(drop.campaign_progress) * 100)
 
     def refresh_channels(self) -> None:
-        table = self.query_one("#channels-table", DataTable)
+        table = self._widget("#channels-table", DataTable)
+        if table is None:
+            return
         table.clear()
         for channel in self.state.channels.values():
             label = f"> {channel.name}" if channel.watching else channel.name
@@ -260,7 +282,9 @@ class TwitchDropsTUI(App[None]):
             table.add_row(*row, key=channel.iid)
 
     def refresh_campaigns(self) -> None:
-        table = self.query_one("#campaigns-table", DataTable)
+        table = self._widget("#campaigns-table", DataTable)
+        if table is None:
+            return
         table.clear()
         for campaign in self.state.campaigns.values():
             table.add_row(
@@ -274,13 +298,21 @@ class TwitchDropsTUI(App[None]):
             )
 
     def refresh_settings(self, *, sync_inputs: bool = False) -> None:
-        self.query_one("#settings-text", Static).update(self.state.settings_text)
+        settings = self._widget("#settings-text", Static)
+        if settings is not None:
+            settings.update(self.state.settings_text)
         if sync_inputs:
-            self.query_one("#priority-input", Input).value = ", ".join(self.state.priority)
-            self.query_one("#exclude-input", Input).value = ", ".join(self.state.exclude)
+            priority = self._widget("#priority-input", Input)
+            exclude = self._widget("#exclude-input", Input)
+            if priority is not None:
+                priority.value = ", ".join(self.state.priority)
+            if exclude is not None:
+                exclude.value = ", ".join(self.state.exclude)
 
     def selected_channel_id(self) -> str | None:
-        table = self.query_one("#channels-table", DataTable)
+        table = self._widget("#channels-table", DataTable)
+        if table is None:
+            return None
         if table.row_count == 0 or table.cursor_row < 0:
             return None
         try:
