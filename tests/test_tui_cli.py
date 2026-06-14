@@ -1,6 +1,7 @@
 import unittest
 from io import StringIO
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from rich.console import Console
 
@@ -34,6 +35,49 @@ class PortableCLITests(unittest.TestCase):
         console = Console(record=True, width=width, color_system=None, file=StringIO())
         console.print(renderable)
         return console.export_text()
+
+    def test_draw_clears_screen_after_first_render_when_supported(self):
+        manager = self.make_manager()
+        console = SimpleNamespace(
+            width=120,
+            is_terminal=True,
+            clear=lambda: calls.append("clear"),
+            rule=lambda *args, **kwargs: calls.append("rule"),
+            print=lambda *args, **kwargs: calls.append("print"),
+        )
+        calls = []
+        manager._console = console
+        manager._redraw_in_place = True
+
+        manager._draw()
+        manager._draw()
+
+        self.assertEqual(calls.count("clear"), 1)
+
+    def test_draw_does_not_clear_screen_for_append_mode(self):
+        manager = self.make_manager()
+        console = SimpleNamespace(
+            width=120,
+            is_terminal=True,
+            clear=lambda: calls.append("clear"),
+            rule=lambda *args, **kwargs: calls.append("rule"),
+            print=lambda *args, **kwargs: calls.append("print"),
+        )
+        calls = []
+        manager._console = console
+        manager._redraw_in_place = False
+
+        manager._draw()
+        manager._draw()
+
+        self.assertNotIn("clear", calls)
+
+    def test_append_mode_env_disables_in_place_redraw(self):
+        manager = self.make_manager()
+        manager._console = Console(file=StringIO())
+
+        with patch.dict("os.environ", {"TERM": "xterm-256color", "TDMINER_CLI_APPEND": "1"}):
+            self.assertFalse(manager._supports_in_place_redraw())
 
     def test_header_includes_himanm_credit(self):
         manager = self.make_manager()

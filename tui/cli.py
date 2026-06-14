@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import webbrowser
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -34,12 +35,15 @@ class PortableCLIManager(TUIManager):
         self._selected_channel: str | None = None
         self._console: Console | None = None
         self._command_task: asyncio.Task[None] | None = None
+        self._drawn_once = False
+        self._redraw_in_place = False
 
     def start(self) -> None:
         if self._command_task is not None and not self._command_task.done():
             return
         self._app_ready.clear()
         self._console = Console()
+        self._redraw_in_place = self._supports_in_place_redraw()
         self._draw()
         self._command_task = asyncio.create_task(self._command_loop())
         self._app_ready.set()
@@ -93,9 +97,19 @@ class PortableCLIManager(TUIManager):
                 self._draw()
 
     def _draw(self) -> None:
-        if self._console is not None:
-            self._console.rule("[bold bright_cyan]Twitch Drops Miner[/] [orange1]by HimanM[/]")
-            self._console.print(self._render())
+        if self._console is None:
+            return
+        if self._drawn_once and self._redraw_in_place:
+            self._console.clear()
+        self._console.rule("[bold bright_cyan]Twitch Drops Miner[/] [orange1]by HimanM[/]")
+        self._console.print(self._render())
+        self._drawn_once = True
+
+    def _supports_in_place_redraw(self) -> bool:
+        term = os.environ.get("TERM", "")
+        if os.environ.get("TDMINER_CLI_APPEND"):
+            return False
+        return bool(self._console and self._console.is_terminal and term.lower() != "dumb")
 
     @property
     def _terminal_width(self) -> int:
