@@ -456,7 +456,11 @@ jobs:
 
             Run `tdminer tui` for the richer Linux/macOS Textual interface, or `tdminer cli` for the portable prompt-based interface used by Windows/source installs and Termux-style terminals.
 
-            The `tdminer` release binaries are self-contained and do not require users to install Python first. Native Termux on Android is not supported by these glibc Linux release assets; use source installs or a proot Linux environment there.
+            The portable CLI includes a boxed slash-command input. Type `/` for commands, `/priority add ` or `/exclude add ` for game completion, and `/switch ` for channel completion.
+
+            The `tdminer` release binaries are self-contained and do not require users to install Python first. The installer needs `curl` and `unzip`, installs to `~/.local/bin` by default, and can be redirected with `TDMINER_INSTALL_DIR=/path/to/bin`.
+
+            Native Termux on Android is not supported by these glibc Linux release assets; use source installs or a proot Linux environment there.
           name: "Release v${{steps.vars.outputs.app_version}}"
           prerelease: false
           removeArtifacts: true

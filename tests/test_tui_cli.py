@@ -1,12 +1,11 @@
 import unittest
-from io import StringIO
 from types import SimpleNamespace
-from unittest.mock import patch
 
-from rich.console import Console
+from prompt_toolkit.completion import CompleteEvent
+from prompt_toolkit.document import Document
 
 from core.constants import PriorityMode
-from tui.cli import PortableCLIManager
+from tui.cli import CommandCompleter, PortableCLIManager
 from tui.state import CampaignSnapshot, ChannelSnapshot
 
 
@@ -31,60 +30,121 @@ class PortableCLITests(unittest.TestCase):
         )
         return PortableCLIManager(twitch)
 
-    def render_text(self, renderable, *, width=120) -> str:
-        console = Console(record=True, width=width, color_system=None, file=StringIO())
-        console.print(renderable)
-        return console.export_text()
-
-    def test_draw_clears_screen_after_first_render_when_supported(self):
-        manager = self.make_manager()
-        console = SimpleNamespace(
-            width=120,
-            is_terminal=True,
-            clear=lambda: calls.append("clear"),
-            rule=lambda *args, **kwargs: calls.append("rule"),
-            print=lambda *args, **kwargs: calls.append("print"),
-        )
-        calls = []
-        manager._console = console
-        manager._redraw_in_place = True
-
-        manager._draw()
-        manager._draw()
-
-        self.assertEqual(calls.count("clear"), 1)
-
-    def test_draw_does_not_clear_screen_for_append_mode(self):
-        manager = self.make_manager()
-        console = SimpleNamespace(
-            width=120,
-            is_terminal=True,
-            clear=lambda: calls.append("clear"),
-            rule=lambda *args, **kwargs: calls.append("rule"),
-            print=lambda *args, **kwargs: calls.append("print"),
-        )
-        calls = []
-        manager._console = console
-        manager._redraw_in_place = False
-
-        manager._draw()
-        manager._draw()
-
-        self.assertNotIn("clear", calls)
-
-    def test_append_mode_env_disables_in_place_redraw(self):
-        manager = self.make_manager()
-        manager._console = Console(file=StringIO())
-
-        with patch.dict("os.environ", {"TERM": "xterm-256color", "TDMINER_CLI_APPEND": "1"}):
-            self.assertFalse(manager._supports_in_place_redraw())
-
-    def test_header_includes_himanm_credit(self):
+    def test_screen_includes_himanm_credit(self):
         manager = self.make_manager()
 
-        text = self.render_text(manager._header())
+        text = manager._screen_text()
 
         self.assertIn("TDMinER by HimanM", text)
+
+    def test_command_completer_includes_common_commands(self):
+        self.assertIn("/channels next", PortableCLIManager.COMMANDS)
+        self.assertIn("/filter expired on", PortableCLIManager.COMMANDS)
+        self.assertIn("/quit", PortableCLIManager.COMMANDS)
+
+    def test_command_completer_triggers_from_slash_prefix(self):
+        completer = CommandCompleter(PortableCLIManager.COMMANDS)
+
+        completions = list(
+            completer.get_completions(Document("/cha", cursor_position=4), CompleteEvent())
+        )
+
+        self.assertTrue(any(completion.text == "/channels" for completion in completions))
+        self.assertTrue(any(completion.text == "/channels next" for completion in completions))
+
+    def test_command_completer_ignores_non_command_text(self):
+        completer = CommandCompleter(PortableCLIManager.COMMANDS)
+
+        completions = list(
+            completer.get_completions(Document("cha", cursor_position=3), CompleteEvent())
+        )
+
+        self.assertEqual([], completions)
+
+    def test_command_completer_suggests_available_games_for_priority_add(self):
+        candidates = {"/priority add": ["Overwatch", "Sports"]}
+        completer = CommandCompleter(
+            PortableCLIManager.COMMANDS,
+            lambda command: candidates.get(command, []),
+        )
+
+        completions = list(
+            completer.get_completions(Document("/priority add O", cursor_position=15), CompleteEvent())
+        )
+
+        self.assertEqual(["Overwatch"], [completion.text for completion in completions])
+
+    def test_command_completer_inserts_space_before_argument_after_exact_command(self):
+        candidates = {"/farm-unlinked": ["on", "off"]}
+        completer = CommandCompleter(
+            PortableCLIManager.COMMANDS,
+            lambda command: candidates.get(command, []),
+        )
+
+        completions = list(
+            completer.get_completions(Document("/farm-unlinked", cursor_position=14), CompleteEvent())
+        )
+
+        self.assertIn(" on", [completion.text for completion in completions])
+        self.assertIn(" off", [completion.text for completion in completions])
+
+    def test_dynamic_completions_use_manager_state(self):
+        manager = self.make_manager()
+        manager.state.available_games = ["Overwatch", "Sports"]
+        manager.state.priority = ["Sports"]
+        manager.state.channels["1"] = ChannelSnapshot(
+            iid="1",
+            name="channel-one",
+            status="ONLINE",
+            game="Overwatch",
+            viewers="10",
+            drops=True,
+            acl_based=False,
+        )
+
+        self.assertEqual(["Overwatch"], manager._completion_candidates("/priority add"))
+        self.assertEqual(["channel-one"], manager._completion_candidates("/switch"))
+
+    def test_switch_command_accepts_channel_name(self):
+        manager = self.make_manager()
+        manager.state.channels["1"] = ChannelSnapshot(
+            iid="1",
+            name="channel-one",
+            status="ONLINE",
+            game="Overwatch",
+            viewers="10",
+            drops=True,
+            acl_based=False,
+        )
+
+        manager._handle_command("/switch channel-one")
+
+        self.assertEqual("1", manager.selected_channel_id())
+
+    def test_print_logs_without_textual_app(self):
+        manager = self.make_manager()
+
+        manager.print("hello")
+
+        self.assertTrue(any("hello" in line for line in manager.state.logs))
+
+    def test_stop_ignores_prompt_toolkit_app_that_is_not_running(self):
+        manager = self.make_manager()
+        manager._pt_app = SimpleNamespace(
+            future=None,
+            exit=lambda: self.fail("exit should not be called for a stopped app"),
+        )
+
+        manager.stop()
+
+    def test_stop_ignores_prompt_toolkit_app_that_already_exited(self):
+        manager = self.make_manager()
+        manager._pt_app = SimpleNamespace(
+            future=SimpleNamespace(done=lambda: True),
+            exit=lambda: self.fail("exit should not be called for a completed app"),
+        )
+
+        manager.stop()
 
     def test_channels_view_is_capped_and_scrollable(self):
         manager = self.make_manager()
@@ -100,9 +160,9 @@ class PortableCLITests(unittest.TestCase):
                 watching=index == 0,
             )
 
-        first_page = self.render_text(manager._channels_view())
+        first_page = "\n".join(manager._channels_lines(120))
         manager._scroll_channels("next")
-        second_page = self.render_text(manager._channels_view())
+        second_page = "\n".join(manager._channels_lines(120))
 
         self.assertIn("channel-0", first_page)
         self.assertNotIn("channel-10", first_page)
@@ -111,7 +171,6 @@ class PortableCLITests(unittest.TestCase):
 
     def test_channels_view_removes_columns_in_narrow_terminals(self):
         manager = self.make_manager()
-        manager._console = Console(width=56, file=StringIO())
         manager.state.channels["1"] = ChannelSnapshot(
             iid="1",
             name="channel-1",
@@ -123,10 +182,10 @@ class PortableCLITests(unittest.TestCase):
             watching=False,
         )
 
-        text = self.render_text(manager._channels_view(), width=56)
+        text = "\n".join(manager._channels_lines(56))
 
         self.assertIn("channel-1", text)
-        self.assertIn("drops", text)
+        self.assertIn("drop", text)
         self.assertNotIn("viewers", text)
         self.assertNotIn("acl", text)
 
@@ -170,22 +229,21 @@ class PortableCLITests(unittest.TestCase):
             allowed_channels="-",
         )
 
-        first_page = self.render_text(manager._drops_view())
+        first_page = "\n".join(manager._drops_lines(120))
         manager._scroll_campaigns("next")
-        second_page = self.render_text(manager._drops_view())
+        second_page = "\n".join(manager._drops_lines(120))
         manager._handle_filter("expired on")
         manager._scroll_campaigns("next")
-        filtered = self.render_text(manager._drops_view())
+        filtered = "\n".join(manager._drops_lines(120))
 
         self.assertIn("Campaign 0", first_page)
         self.assertNotIn("Campaign 8", first_page)
         self.assertIn("Campaign 8", second_page)
         self.assertIn("Expired Campaign", filtered)
-        self.assertIn("/drops next", first_page)
+        self.assertIn("expired=on", filtered)
 
     def test_drops_view_removes_columns_in_narrow_terminals(self):
         manager = self.make_manager()
-        manager._console = Console(width=56, file=StringIO())
         manager.state.campaigns["1"] = CampaignSnapshot(
             id="1",
             name="Long Campaign",
@@ -205,7 +263,7 @@ class PortableCLITests(unittest.TestCase):
             allowed_channels="-",
         )
 
-        text = self.render_text(manager._drops_view(), width=56)
+        text = "\n".join(manager._drops_lines(56))
 
         self.assertIn("Game", text)
         self.assertIn("progress", text)

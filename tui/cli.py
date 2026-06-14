@@ -1,51 +1,143 @@
 from __future__ import annotations
 
 import asyncio
-import os
+import shutil
 import webbrowser
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
-from rich import box
-from rich.console import Console, Group
-from rich.panel import Panel
-from rich.progress import BarColumn, Progress, TextColumn
-from rich.table import Table
-from rich.text import Text
+from prompt_toolkit.application import Application
+from prompt_toolkit.completion import CompleteEvent, Completer, Completion
+from prompt_toolkit.document import Document
+from prompt_toolkit.filters import has_completions
+from prompt_toolkit.formatted_text import AnyFormattedText
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.layout import ConditionalContainer, HSplit, Layout, Window
+from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.layout.menus import CompletionsMenu
+from prompt_toolkit.styles import Style
+from prompt_toolkit.widgets import Frame, TextArea
 
 from core.constants import PriorityMode
 from tui.manager import TUIManager
-from tui.state import CampaignSnapshot, DropSnapshot
+from tui.state import CampaignSnapshot
 
 if TYPE_CHECKING:
     from core.utils import Game
 
 
+class CommandCompleter(Completer):
+    """Slash-command completer that works from the whole input line."""
+
+    def __init__(
+        self,
+        commands: tuple[str, ...],
+        argument_candidates: Callable[[str], list[str]] | None = None,
+    ) -> None:
+        self._commands = commands
+        self._argument_candidates = argument_candidates or (lambda _command: [])
+
+    def get_completions(self, document: Document, complete_event: CompleteEvent):
+        text = document.text_before_cursor
+        if not text.startswith("/"):
+            return
+        argument_completion = self._argument_completion(text)
+        if argument_completion is not None:
+            fragment, candidates, needs_space = argument_completion
+            for candidate in candidates:
+                if candidate.lower().startswith(fragment.lower()):
+                    yield Completion(
+                        f" {candidate}" if needs_space else candidate,
+                        start_position=-len(fragment),
+                        display=candidate,
+                    )
+            return
+        needle = text.lower()
+        for command in self._commands:
+            if command.lower().startswith(needle):
+                yield Completion(command, start_position=-len(text), display=command)
+
+    def _argument_completion(self, text: str) -> tuple[str, list[str], bool] | None:
+        lowered = text.lower()
+        for command in self._commands:
+            candidates = self._argument_candidates(command)
+            if not candidates:
+                continue
+            if lowered == command:
+                return "", candidates, True
+            prefix = f"{command} "
+            if lowered.startswith(prefix):
+                return text[len(prefix) :], candidates, False
+        return None
+
+
 class PortableCLIManager(TUIManager):
-    """Prompt-based CLI frontend for terminals where the full Textual app is a poor fit."""
+    """Full-screen prompt_toolkit frontend for portable terminal sessions."""
 
     CHANNEL_PAGE_SIZE = 10
     CAMPAIGN_PAGE_SIZE = 8
+    COMMANDS = (
+        "/dashboard",
+        "/channels",
+        "/channels next",
+        "/channels prev",
+        "/drops",
+        "/drops next",
+        "/drops prev",
+        "/settings",
+        "/logs",
+        "/reload",
+        "/open",
+        "/copy",
+        "/switch",
+        "/priority add",
+        "/priority remove",
+        "/exclude add",
+        "/exclude remove",
+        "/mode",
+        "/mode priority-only",
+        "/mode ending-soonest",
+        "/mode low-availability",
+        "/filter not-linked",
+        "/filter not-linked on",
+        "/filter not-linked off",
+        "/filter upcoming",
+        "/filter upcoming on",
+        "/filter upcoming off",
+        "/filter expired",
+        "/filter expired on",
+        "/filter expired off",
+        "/filter excluded",
+        "/filter excluded on",
+        "/filter excluded off",
+        "/filter finished",
+        "/filter finished on",
+        "/filter finished off",
+        "/farm-unlinked",
+        "/farm-unlinked on",
+        "/farm-unlinked off",
+        "/help",
+        "/quit",
+    )
 
     def __init__(self, twitch: Any) -> None:
+        self._pt_app: Application[None] | None = None
         super().__init__(twitch)
         self._view = "dashboard"
         self._channel_offset = 0
         self._campaign_offset = 0
         self._selected_channel: str | None = None
-        self._console: Console | None = None
-        self._command_task: asyncio.Task[None] | None = None
-        self._drawn_once = False
-        self._redraw_in_place = False
+        self._input: TextArea | None = None
+        self._pt_app_task: asyncio.Task[None] | None = None
+        self._clock_task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
-        if self._command_task is not None and not self._command_task.done():
+        if self._pt_app_task is not None and not self._pt_app_task.done():
             return
         self._app_ready.clear()
-        self._console = Console()
-        self._redraw_in_place = self._supports_in_place_redraw()
-        self._draw()
-        self._command_task = asyncio.create_task(self._command_loop())
+        self._pt_app = self._make_app()
+        self._pt_app_task = asyncio.create_task(self._pt_app.run_async())
+        self._clock_task = asyncio.create_task(self._clock_loop())
         self._app_ready.set()
 
     async def wait_until_ready(self) -> None:
@@ -53,8 +145,10 @@ class PortableCLIManager(TUIManager):
 
     def stop(self) -> None:
         super().stop()
-        if self._command_task is not None:
-            self._command_task.cancel()
+        if self._clock_task is not None:
+            self._clock_task.cancel()
+        if self._pt_app is not None and self._pt_app.future is not None and not self._pt_app.future.done():
+            self._pt_app.exit()
 
     def close_window(self) -> None:
         self.stop()
@@ -68,54 +162,91 @@ class PortableCLIManager(TUIManager):
         return self._selected_channel
 
     def refresh_status(self) -> None:
-        return None
+        self._invalidate()
 
     def refresh_login(self) -> None:
-        self._draw()
+        self._invalidate()
 
     def refresh_progress(self) -> None:
-        return None
+        self._invalidate()
 
     def refresh_channels(self) -> None:
-        return None
+        self._invalidate()
 
     def refresh_campaigns(self) -> None:
-        return None
+        self._invalidate()
 
     def refresh_settings(self) -> None:
-        return None
+        self._invalidate()
 
-    async def _command_loop(self) -> None:
+    def _make_app(self) -> Application[None]:
+        completer = CommandCompleter(self.COMMANDS, self._completion_candidates)
+        self._input = TextArea(
+            height=1,
+            prompt=[("class:prompt", "> ")],
+            completer=completer,
+            complete_while_typing=True,
+            multiline=False,
+            accept_handler=self._accept_command,
+        )
+        body = HSplit(
+            [
+                Window(
+                    FormattedTextControl(self._screen_fragments),
+                    wrap_lines=False,
+                    always_hide_cursor=True,
+                ),
+                Window(height=1, char="-", style="class:rule"),
+                Frame(self._input, title="command"),
+                ConditionalContainer(
+                    CompletionsMenu(max_height=6, scroll_offset=1),
+                    filter=has_completions,
+                ),
+            ]
+        )
+        bindings = KeyBindings()
+
+        @bindings.add("c-c")
+        @bindings.add("c-q")
+        def _quit(event) -> None:
+            self.close()
+
+        return Application(
+            layout=Layout(body, focused_element=self._input),
+            key_bindings=bindings,
+            full_screen=True,
+            mouse_support=True,
+            erase_when_done=False,
+            style=Style.from_dict(
+                {
+                    "screen": "ansidefault bg:#101014",
+                    "rule": "#5f5f5f",
+                    "frame.border": "#00d7ff",
+                    "frame.label": "bold #ffaf00",
+                    "prompt": "bold #00d7ff",
+                    "completion-menu.completion": "bg:#202028 #d7d7d7",
+                    "completion-menu.completion.current": "bg:#005f87 #ffffff bold",
+                    "completion-menu.meta.completion": "bg:#202028 #878787",
+                    "completion-menu.meta.completion.current": "bg:#005f87 #ffffff",
+                }
+            ),
+        )
+
+    async def _clock_loop(self) -> None:
         while not self.close_requested:
-            try:
-                raw = await asyncio.to_thread(input, "tdminer> ")
-            except (EOFError, KeyboardInterrupt):
-                self.close()
-                return
-            self._handle_command(raw.strip())
-            if not self.close_requested:
-                self._draw()
+            await asyncio.sleep(1)
+            self._invalidate()
 
-    def _draw(self) -> None:
-        if self._console is None:
-            return
-        if self._drawn_once and self._redraw_in_place:
-            self._console.clear()
-        self._console.rule("[bold bright_cyan]Twitch Drops Miner[/] [orange1]by HimanM[/]")
-        self._console.print(self._render())
-        self._drawn_once = True
+    def _invalidate(self) -> None:
+        if self._pt_app is not None:
+            self._pt_app.invalidate()
 
-    def _supports_in_place_redraw(self) -> bool:
-        term = os.environ.get("TERM", "")
-        if os.environ.get("TDMINER_CLI_APPEND"):
-            return False
-        return bool(self._console and self._console.is_terminal and term.lower() != "dumb")
-
-    @property
-    def _terminal_width(self) -> int:
-        if self._console is not None:
-            return self._console.width
-        return 120
+    def _accept_command(self, buffer) -> bool:
+        raw = buffer.text.strip()
+        buffer.text = ""
+        self._handle_command(raw)
+        self._invalidate()
+        return True
 
     def _handle_command(self, raw: str) -> None:
         if not raw:
@@ -144,7 +275,7 @@ class PortableCLIManager(TUIManager):
         elif command == "copy":
             self._show_login_url()
         elif command == "switch":
-            self._selected_channel = rest or self._selected_channel
+            self._selected_channel = self._resolve_channel_id(rest) or self._selected_channel
             self._switch_channel()
         elif command == "priority":
             self._handle_priority(rest)
@@ -165,6 +296,48 @@ class PortableCLIManager(TUIManager):
             )
         else:
             self.print(f"Unknown command: {raw}")
+
+    def _completion_candidates(self, command: str) -> list[str]:
+        if command == "/priority add":
+            existing = set(self.state.priority)
+            return [game for game in self.state.available_games if game not in existing]
+        if command == "/priority remove":
+            return list(self.state.priority)
+        if command == "/exclude add":
+            existing = set(self.state.exclude)
+            return [game for game in self.state.available_games if game not in existing]
+        if command == "/exclude remove":
+            return list(self.state.exclude)
+        if command == "/switch":
+            return [channel.name for channel in self.state.channels.values()]
+        if command in {"/farm-unlinked", "/filter not-linked", "/filter upcoming", "/filter expired", "/filter excluded", "/filter finished"}:
+            return ["on", "off"]
+        if command == "/mode":
+            return ["priority-only", "ending-soonest", "low-availability"]
+        return []
+
+    def _resolve_channel_id(self, value: str) -> str | None:
+        value = value.strip()
+        if not value:
+            return None
+        if value in self.state.channels:
+            return value
+        lowered = value.lower()
+        for iid, channel in self.state.channels.items():
+            if channel.name.lower() == lowered:
+                return iid
+        matches = [
+            iid
+            for iid, channel in self.state.channels.items()
+            if channel.name.lower().startswith(lowered)
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        if matches:
+            self.print(f"Channel name is ambiguous: {value}")
+        else:
+            self.print(f"Channel not found: {value}")
+        return None
 
     def _scroll_channels(self, action: str) -> None:
         total = len(self.state.channels)
@@ -251,202 +424,170 @@ class PortableCLIManager(TUIManager):
         self._channel_offset = 0
         self._campaign_offset = 0
 
-    def _render(self) -> Group:
-        header = self._header()
-        if self.state.login.activation_url:
-            body = self._login_view()
-        elif self._view == "channels":
-            body = self._channels_view()
-        elif self._view == "drops":
-            body = self._drops_view()
-        elif self._view == "settings":
-            body = self._settings_view()
-        elif self._view == "logs":
-            body = self._logs_view()
-        else:
-            body = self._dashboard_view()
-        return Group(header, body, self._footer())
+    def _screen_fragments(self) -> AnyFormattedText:
+        return [("class:screen", self._screen_text())]
 
-    def _header(self) -> Panel:
-        logo = Text("TDMinER", style="bold bright_cyan")
-        subtitle = Text(" by HimanM", style="bold orange1")
-        status = Text(
-            f"  |  {self.state.status}  |  {datetime.now().strftime('%H:%M:%S')}",
-            style="bright_black",
-        )
-        title = Text.assemble(logo, subtitle, status)
-        return Panel(title, box=box.SIMPLE_HEAVY, border_style="bright_cyan")
-
-    def _footer(self) -> Panel:
-        return Panel(
-            Text(
-                "/dashboard  /channels next|prev  /drops next|prev  /filter expired on  /reload  /quit",
-                style="dim",
-            ),
-            box=box.SIMPLE,
-            border_style="cyan",
-        )
-
-    def _login_view(self) -> Panel:
-        login = self.state.login
-        content = Text()
-        content.append("Twitch device login required\n\n", style="bold cyan")
-        content.append("Open this URL:\n", style="orange1")
-        content.append(f"{login.activation_url}\n\n", style="bold white")
-        content.append("Enter code:\n", style="orange1")
-        content.append(f"{login.user_code}\n\n", style="bold cyan")
-        content.append("Commands: /open, /copy, /quit", style="dim")
-        return Panel(content, title="[bright_cyan]login[/]", border_style="bright_cyan")
-
-    def _dashboard_view(self) -> Group:
-        if self._terminal_width < 96:
-            return Group(
-                self._status_panel(),
-                self._drop_panel(self.state.current_drop),
-                self._recent_logs_panel(),
-            )
-        table = Table.grid(expand=True)
-        table.add_column(ratio=1)
-        table.add_column(ratio=2)
-        table.add_row(self._status_panel(), self._drop_panel(self.state.current_drop))
-        return Group(table, self._recent_logs_panel())
-
-    def _status_panel(self) -> Panel:
-        websockets = sum(1 for ws in self.state.websockets.values() if "connected" in ws.status.lower())
-        watching = next((ch.name for ch in self.state.channels.values() if ch.watching), "-")
+    def _screen_text(self) -> str:
+        width, height = self._terminal_size()
         lines = [
-            ("status", self.state.status),
-            ("watching", watching),
-            ("websockets", f"{websockets} connected"),
-            ("mode", self.state.priority_mode),
-            ("farm unlinked", "on" if self.state.farm_unlinked else "off"),
+            self._title(width),
+            self._tabs(width),
+            "",
         ]
-        table = Table.grid(padding=(0, 2))
-        table.add_column(style="cyan", no_wrap=True)
-        table.add_column(style="white")
-        for key, value in lines:
-            table.add_row(key, value)
-        return Panel(table, title="[bright_cyan]status[/]", border_style="bright_cyan")
+        if self.state.login.activation_url:
+            lines.extend(self._login_lines(width))
+        elif self._view == "channels":
+            lines.extend(self._channels_lines(width))
+        elif self._view == "drops":
+            lines.extend(self._drops_lines(width))
+        elif self._view == "settings":
+            lines.extend(self._settings_lines(width))
+        elif self._view == "logs":
+            lines.extend(self._log_lines(width, height - len(lines) - 2))
+        else:
+            lines.extend(self._dashboard_lines(width, height - len(lines) - 2))
+        return "\n".join(lines[: max(1, height - 2)])
 
-    def _drop_panel(self, drop: DropSnapshot) -> Panel:
-        progress = Progress(
-            TextColumn("{task.description}", style="cyan"),
-            BarColumn(bar_width=None),
-            TextColumn("{task.percentage:>5.1f}%"),
-            expand=True,
-        )
-        progress.add_task("drop", total=100, completed=drop.drop_progress * 100)
-        progress.add_task("campaign", total=100, completed=drop.campaign_progress * 100)
-        content = Group(
-            Text(drop.game, style="bold white"),
-            Text(drop.rewards, style="orange1"),
-            Text(f"remaining {drop.remaining}", style="dim"),
-            progress,
-        )
-        return Panel(content, title="[orange1]current drop[/]", border_style="orange1")
+    def _title(self, width: int) -> str:
+        text = "TDMinER by HimanM"
+        right = datetime.now().strftime("%H:%M:%S")
+        if width < 48:
+            return text[:width]
+        gap = max(1, width - len(text) - len(right))
+        return f"{text}{' ' * gap}{right}"[:width]
 
-    def _channels_view(self) -> Panel:
+    def _tabs(self, width: int) -> str:
+        tabs = ["dashboard", "drops", "channels", "settings", "logs"]
+        parts = []
+        for tab in tabs:
+            parts.append(f"[{tab}]" if self._view == tab or tab == "dashboard" and self._view == "dashboard" else f" {tab} ")
+        return " ".join(parts)[:width]
+
+    def _dashboard_lines(self, width: int, available_height: int) -> list[str]:
+        drop = self.state.current_drop
+        watching = next((ch.name for ch in self.state.channels.values() if ch.watching), "-")
+        websockets = sum(1 for ws in self.state.websockets.values() if "connected" in ws.status.lower())
+        lines = [
+            self._section("status", width),
+            f"status        {self.state.status}",
+            f"watching      {watching}",
+            f"websockets    {websockets} connected",
+            f"mode          {self.state.priority_mode}",
+            f"farm unlinked {'on' if self.state.farm_unlinked else 'off'}",
+            "",
+            self._section("current drop", width),
+            drop.game,
+            drop.rewards,
+            f"remaining     {drop.remaining}",
+            self._bar("drop", drop.drop_progress, width),
+            self._bar("campaign", drop.campaign_progress, width),
+            "",
+            self._section("logs", width),
+        ]
+        lines.extend(self.state.logs[-max(1, available_height - len(lines)) :] or ["No recent activity"])
+        return [line[:width] for line in lines]
+
+    def _channels_lines(self, width: int) -> list[str]:
         channels = list(self.state.channels.values())
         page = channels[self._channel_offset : self._channel_offset + self.CHANNEL_PAGE_SIZE]
-        table = Table(box=box.SIMPLE_HEAVY, expand=True)
-        if self._terminal_width < 64:
-            columns = ("", "channel", "status", "drops")
-        elif self._terminal_width < 90:
-            columns = ("", "channel", "status", "game", "drops")
+        lines = [self._section(f"channels {self._page_label(self._channel_offset, self.CHANNEL_PAGE_SIZE, len(channels))}", width)]
+        if width < 64:
+            lines.append(f"{'':1} {'channel':24} {'status':10} {'drop':4}")
+            for channel in page:
+                marker = ">" if channel.watching else " "
+                lines.append(f"{marker:1} {channel.name[:24]:24} {channel.status[:10]:10} {'yes' if channel.drops else 'no':4}")
+        elif width < 92:
+            lines.append(f"{'':1} {'channel':24} {'status':10} {'game':20} {'drop':4}")
+            for channel in page:
+                marker = ">" if channel.watching else " "
+                lines.append(
+                    f"{marker:1} {channel.name[:24]:24} {channel.status[:10]:10} {channel.game[:20]:20} {'yes' if channel.drops else 'no':4}"
+                )
         else:
-            columns = ("", "channel", "status", "game", "drops", "viewers", "acl")
-        for column in columns:
-            table.add_column(column, overflow="fold")
-        for channel in page:
-            marker = ">" if channel.watching else " "
-            row = {
-                "": marker,
-                "channel": channel.name,
-                "status": channel.status,
-                "game": channel.game,
-                "drops": "yes" if channel.drops else "no",
-                "viewers": channel.viewers,
-                "acl": "yes" if channel.acl_based else "no",
-            }
-            status = channel.status.lower()
-            if channel.watching:
-                style = "bold black on bright_cyan"
-            elif "online" in status:
-                style = "green"
-            elif "pending" in status:
-                style = "yellow"
-            else:
-                style = "dim"
-            table.add_row(*(row[column] for column in columns), style=style)
-        title = f"channels {self._page_label(self._channel_offset, self.CHANNEL_PAGE_SIZE, len(channels))}"
-        hint = Text(
-            f"Showing {len(page)} rows. Scroll with /channels next or /channels prev.",
-            style="bright_black",
-        )
-        return Panel(Group(table, hint), title=f"[bright_cyan]{title}[/]", border_style="bright_cyan")
+            lines.append(f"{'':1} {'channel':24} {'status':10} {'game':20} {'drop':4} {'viewers':8} {'acl':3}")
+            for channel in page:
+                marker = ">" if channel.watching else " "
+                lines.append(
+                    f"{marker:1} {channel.name[:24]:24} {channel.status[:10]:10} {channel.game[:20]:20} "
+                    f"{'yes' if channel.drops else 'no':4} {channel.viewers[:8]:8} {'yes' if channel.acl_based else 'no':3}"
+                )
+        lines.append("Use /channels next or /channels prev.")
+        return [line[:width] for line in lines]
 
-    def _drops_view(self) -> Panel:
+    def _drops_lines(self, width: int) -> list[str]:
         campaigns = self._visible_campaigns()
-        self._campaign_offset = min(
-            self._campaign_offset,
-            max(0, len(campaigns) - self.CAMPAIGN_PAGE_SIZE),
-        )
+        self._campaign_offset = min(self._campaign_offset, max(0, len(campaigns) - self.CAMPAIGN_PAGE_SIZE))
         page = campaigns[self._campaign_offset : self._campaign_offset + self.CAMPAIGN_PAGE_SIZE]
-        table = Table(box=box.SIMPLE_HEAVY, expand=True)
-        if self._terminal_width < 64:
-            columns = ("game", "status", "progress")
-        elif self._terminal_width < 92:
-            columns = ("game", "campaign", "progress", "drops")
+        lines = [self._section(f"drops {self._page_label(self._campaign_offset, self.CAMPAIGN_PAGE_SIZE, len(campaigns))}", width)]
+        if width < 64:
+            lines.append(f"{'game':22} {'status':10} {'progress':8}")
+            for campaign in page:
+                lines.append(f"{campaign.game[:22]:22} {campaign.status[:10]:10} {campaign.percent:8}")
+        elif width < 92:
+            lines.append(f"{'game':18} {'campaign':30} {'progress':8} {'drops':5}")
+            for campaign in page:
+                lines.append(f"{campaign.game[:18]:18} {campaign.name[:30]:30} {campaign.percent:8} {len(campaign.drops):5}")
         else:
-            columns = ("game", "campaign", "status", "linked", "progress", "drops")
-        for column in columns:
-            table.add_column(column, overflow="fold")
-        for campaign in page:
-            row = {
-                "game": campaign.game,
-                "campaign": campaign.name,
-                "status": campaign.status,
-                "linked": "yes" if campaign.linked else "no",
-                "progress": campaign.percent,
-                "drops": str(len(campaign.drops)),
-            }
-            table.add_row(
-                *(row[column] for column in columns),
-                style="green" if campaign.active else "yellow" if campaign.upcoming else "dim",
-            )
-        title = f"drops {self._page_label(self._campaign_offset, self.CAMPAIGN_PAGE_SIZE, len(campaigns))}"
-        filter_bits = [
-            f"not-linked={'on' if self.state.campaign_filters.show_not_linked else 'off'}",
-            f"upcoming={'on' if self.state.campaign_filters.show_upcoming else 'off'}",
-            f"expired={'on' if self.state.campaign_filters.show_expired else 'off'}",
-            f"excluded={'on' if self.state.campaign_filters.show_excluded else 'off'}",
-            f"finished={'on' if self.state.campaign_filters.show_finished else 'off'}",
-        ]
-        hint = Text(
-            " | ".join(filter_bits)
-            + "\nScroll with /drops next or /drops prev. Toggle with /filter expired on.",
-            style="bright_black",
+            lines.append(f"{'game':18} {'campaign':32} {'status':10} {'linked':6} {'progress':8} {'drops':5}")
+            for campaign in page:
+                lines.append(
+                    f"{campaign.game[:18]:18} {campaign.name[:32]:32} {campaign.status[:10]:10} "
+                    f"{'yes' if campaign.linked else 'no':6} {campaign.percent:8} {len(campaign.drops):5}"
+                )
+        filters = self.state.campaign_filters
+        lines.append(
+            f"filters: not-linked={'on' if filters.show_not_linked else 'off'} "
+            f"upcoming={'on' if filters.show_upcoming else 'off'} expired={'on' if filters.show_expired else 'off'} "
+            f"excluded={'on' if filters.show_excluded else 'off'} finished={'on' if filters.show_finished else 'off'}"
         )
-        return Panel(Group(table, hint), title=f"[orange1]{title}[/]", border_style="orange1")
+        return [line[:width] for line in lines]
 
-    def _settings_view(self) -> Panel:
-        table = Table.grid(padding=(0, 3))
-        table.add_column(style="cyan", no_wrap=True)
-        table.add_column(style="white")
-        table.add_row("priority mode", self.state.priority_mode)
-        table.add_row("farm unlinked", "on" if self.state.farm_unlinked else "off")
-        table.add_row("available games", str(len(self.state.available_games)))
-        table.add_row("priority", ", ".join(self.state.priority) or "-")
-        table.add_row("exclude", ", ".join(self.state.exclude) or "-")
-        table.add_row("commands", "/priority add <game>  /exclude add <game>  /mode <name>")
-        return Panel(table, title="[bright_cyan]settings[/]", border_style="bright_cyan")
+    def _settings_lines(self, width: int) -> list[str]:
+        lines = [
+            self._section("settings", width),
+            f"priority mode  {self.state.priority_mode}",
+            f"farm unlinked  {'on' if self.state.farm_unlinked else 'off'}",
+            f"available      {len(self.state.available_games)} games",
+            f"priority       {', '.join(self.state.priority) or '-'}",
+            f"exclude        {', '.join(self.state.exclude) or '-'}",
+            "",
+            "/priority add <game>  /exclude add <game>  /mode <name>",
+            "/farm-unlinked on|off  (only works in priority-only mode)",
+        ]
+        return [line[:width] for line in lines]
 
-    def _logs_view(self) -> Panel:
-        return self._recent_logs_panel(limit=20)
+    def _log_lines(self, width: int, available_height: int) -> list[str]:
+        lines = [self._section("logs", width)]
+        lines.extend(self.state.logs[-max(1, available_height - 1) :] or ["No recent activity"])
+        return [line[:width] for line in lines]
 
-    def _recent_logs_panel(self, *, limit: int = 8) -> Panel:
-        logs = "\n".join(self.state.logs[-limit:]) or "No recent activity"
-        return Panel(Text(logs, style="dim"), title="[bright_black]logs[/]", border_style="bright_black")
+    def _login_lines(self, width: int) -> list[str]:
+        login = self.state.login
+        lines = [
+            self._section("login", width),
+            "Twitch device login required",
+            f"URL:  {login.activation_url}",
+            f"Code: {login.user_code}",
+            "Commands: /open /copy /quit",
+        ]
+        return [line[:width] for line in lines]
+
+    def _bar(self, label: str, value: float, width: int) -> str:
+        percent = max(0.0, min(1.0, value))
+        bar_width = max(8, min(40, width - len(label) - 12))
+        done = round(bar_width * percent)
+        return f"{label:<9} [{'#' * done}{'-' * (bar_width - done)}] {percent:>5.1%}"
+
+    @staticmethod
+    def _section(label: str, width: int) -> str:
+        text = f" {label} "
+        side = max(0, (width - len(text)) // 2)
+        return f"{'-' * side}{text}{'-' * max(0, width - side - len(text))}"
+
+    @staticmethod
+    def _terminal_size() -> tuple[int, int]:
+        size = shutil.get_terminal_size((100, 28))
+        return size.columns, size.lines
 
     def _visible_campaigns(self) -> list[CampaignSnapshot]:
         filters = self.state.campaign_filters
