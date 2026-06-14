@@ -36,7 +36,7 @@ This fork also ships terminal frontends for users who want a CLI-friendly app th
 - `tdminer tui` starts the richer Textual interface on Linux/macOS.
 - `tdminer cli` starts the portable prompt-based interface for Windows, Termux-style shells, and terminals where full-screen TUIs do not behave well.
 
-Install the latest TUI release on Linux or macOS:
+Install the latest TUI release on Linux/macOS, or install from source automatically on Termux:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/HimanM/TwitchDropsMiner/main/scripts/install.sh | sh
@@ -56,7 +56,13 @@ tdminer cli
 
 The TUI login uses Twitch device activation. When login is needed, `tdminer` shows the activation URL and user code in the terminal. You can open the URL from the TUI, copy it, or manually paste/type it on another machine; this works for headless Linux sessions where no browser is available.
 
-The release binaries are self-contained PyInstaller executables, so users do not need to install Python or Python packages first. The installer requires `curl` and `unzip`, installs to `~/.local/bin` by default, and can be pointed somewhere else with `TDMINER_INSTALL_DIR=/path/to/bin`.
+The Linux/macOS release binaries are self-contained PyInstaller executables, so those users do not need to install Python or Python packages first. The binary installer requires `curl` and `unzip`, installs to `~/.local/bin` by default, and can be pointed somewhere else with `TDMINER_INSTALL_DIR=/path/to/bin`.
+
+Native Termux on Android cannot run the Linux release binary. In Termux, the same installer downloads the source, creates a Python virtual environment under `~/.local/share/tdminer`, installs the TUI dependencies, and writes a `tdminer` launcher to `$PREFIX/bin`. Termux users need Python and build tools first:
+
+```sh
+pkg install python clang curl tar
+```
 
 Useful TUI shortcuts:
 
@@ -79,9 +85,7 @@ Useful portable CLI commands:
 
 The portable CLI has a boxed command input with slash-command autocomplete. Type `/` to see commands, `/priority add ` or `/exclude add ` to complete available games, and `/switch ` to complete channel names.
 
-The release workflow builds and publishes separate TUI assets for macOS, Linux x86_64, and Linux aarch64. The install script always fetches the latest matching `tdminer` asset from GitHub Releases.
-
-Native Termux on Android is not supported by the release installer because Termux does not use glibc Linux binaries. Advanced users can run from source in Termux with Python 3.10+ and the project dependencies installed, or use a proot Ubuntu/Debian environment with the release installer.
+The release workflow builds and publishes separate TUI assets for macOS, Linux x86_64, and Linux aarch64. The install script fetches the latest matching `tdminer` asset from GitHub Releases on glibc Linux/macOS, and uses a source install on Termux.
 
 ### Pictures:
 
