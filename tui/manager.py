@@ -287,7 +287,7 @@ class TUIInventory:
             f"{drop.rewards_text()} - {drop.progress:.1%} ({drop.current_minutes}/{drop.required_minutes} min)"
             for drop in campaign.drops
         )
-        settings = self._twitch.settings
+        settings = self._manager._twitch.settings
         priority_only = settings.priority_mode is PriorityMode.PRIORITY_ONLY
         game_name = campaign.game.name
         return CampaignSnapshot(
@@ -387,14 +387,12 @@ class TUIManager:
         )
         self.state.farm_unlinked = bool(getattr(settings, "farm_unlinked", False))
         self.state.available_games = sorted(game.name for game in self._games)
-        self.state.settings_text = "\n".join(
-            [
-                f"Priority mode: {priority_mode}",
-                f"Priority games: {', '.join(self.state.priority) or '-'}",
-                f"Excluded games: {', '.join(self.state.exclude) or '-'}",
-                f"Farm unlinked drops: {self.state.farm_unlinked}",
-                f"Available games: {len(self.state.available_games)}",
-            ]
+        self.state.settings_text = (
+            f"Mode: {self.state.priority_mode} | "
+            f"Priority: {len(self.state.priority)} | "
+            f"Exclude: {len(self.state.exclude)} | "
+            f"Farm unlinked: {self.state.farm_unlinked} | "
+            f"Games: {len(self.state.available_games)}"
         )
         self.refresh_settings()
 

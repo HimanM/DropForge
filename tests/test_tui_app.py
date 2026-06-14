@@ -1,28 +1,30 @@
 import unittest
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import PropertyMock, patch
 
+from core.constants import PriorityMode
 from tui.app import TwitchDropsTUI
 from tui.manager import TUIManager
 from tui.state import CampaignSnapshot, DropSnapshot, TUIState
 
 
 class TUIApplicationTests(unittest.IsolatedAsyncioTestCase):
-    def make_app(self, state=None, *, on_ready=None):
+    def make_app(self, state=None, *, on_ready=None, **callbacks):
         return TwitchDropsTUI(
             state or TUIState(),
-            on_close=lambda: None,
-            on_reload=lambda: None,
-            login_confirm=lambda: None,
-            on_switch=lambda: None,
-            on_save_settings=lambda priority, exclude: None,
-            on_add_priority_game=lambda game: None,
-            on_add_exclude_game=lambda game: None,
-            on_remove_priority_game=lambda game: None,
-            on_remove_exclude_game=lambda game: None,
-            on_move_priority_game=lambda game, offset: None,
-            on_set_priority_mode=lambda mode: None,
-            on_set_farm_unlinked=lambda enabled: None,
+            on_close=callbacks.get("on_close", lambda: None),
+            on_reload=callbacks.get("on_reload", lambda: None),
+            login_confirm=callbacks.get("login_confirm", lambda: None),
+            on_switch=callbacks.get("on_switch", lambda: None),
+            on_save_settings=callbacks.get("on_save_settings", lambda priority, exclude: None),
+            on_add_priority_game=callbacks.get("on_add_priority_game", lambda game: None),
+            on_add_exclude_game=callbacks.get("on_add_exclude_game", lambda game: None),
+            on_remove_priority_game=callbacks.get("on_remove_priority_game", lambda game: None),
+            on_remove_exclude_game=callbacks.get("on_remove_exclude_game", lambda game: None),
+            on_move_priority_game=callbacks.get("on_move_priority_game", lambda game, offset: None),
+            on_set_priority_mode=callbacks.get("on_set_priority_mode", lambda mode: None),
+            on_set_farm_unlinked=callbacks.get("on_set_farm_unlinked", lambda enabled: None),
             on_ready=on_ready,
         )
 
@@ -170,8 +172,50 @@ class TUIApplicationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.query_one("#priority-table").row_count, 1)
             self.assertEqual(app.query_one("#exclude-table").row_count, 1)
 
+    async def test_settings_refresh_does_not_emit_priority_mode_change(self):
+        state = TUIState()
+        changes = []
+        app = self.make_app(state, on_set_priority_mode=changes.append)
+
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            app.refresh_settings(sync_inputs=True)
+            await pilot.pause()
+
+        self.assertEqual(changes, [])
+
 
 class TUIManagerTests(unittest.IsolatedAsyncioTestCase):
+    def test_inventory_snapshot_reads_settings_from_manager(self):
+        settings = SimpleNamespace(
+            priority=["Game"],
+            exclude=set(),
+            farm_unlinked=False,
+            priority_mode=PriorityMode.PRIORITY_ONLY,
+        )
+        manager = TUIManager(SimpleNamespace(settings=settings))
+        campaign = SimpleNamespace(
+            id="campaign",
+            name="Campaign",
+            game=SimpleNamespace(name="Game"),
+            active=True,
+            upcoming=False,
+            expired=False,
+            eligible=True,
+            finished=False,
+            required_minutes=60,
+            progress=0.5,
+            drops=[],
+            starts_at=datetime.now(timezone.utc),
+            ends_at=datetime.now(timezone.utc),
+            allowed_channels=[],
+        )
+
+        snapshot = manager.inv._snapshot(campaign)
+
+        self.assertEqual(snapshot.game, "Game")
+        self.assertFalse(snapshot.excluded)
+
     async def test_wait_until_ready_has_timeout_fallback(self):
         twitch = SimpleNamespace(
             settings=SimpleNamespace(priority=[], exclude=set(), farm_unlinked=False)

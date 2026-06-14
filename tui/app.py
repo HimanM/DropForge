@@ -114,7 +114,6 @@ class TwitchDropsTUI(App[None]):
     Button {
         min-width: 7;
         width: auto;
-        height: 1;
         padding: 0 1;
     }
 
@@ -129,6 +128,8 @@ class TwitchDropsTUI(App[None]):
 
     BINDINGS = [
         ("q", "request_quit", "Quit"),
+        ("ctrl+q", "request_quit", "Quit"),
+        ("ctrl+c", "request_quit", "Quit"),
         ("r", "reload", "Reload"),
         ("s", "switch_channel", "Switch"),
         ("b", "open_browser", "Open Browser"),
@@ -186,8 +187,8 @@ class TwitchDropsTUI(App[None]):
                             yield Static("", id="login-text")
                             yield Static("", id="login-url")
                             with Horizontal(id="login-actions"):
-                                yield Button("open", id="open-browser")
-                                yield Button("copy", id="copy-url")
+                                yield Button("open", id="open-browser", compact=True, flat=True)
+                                yield Button("copy", id="copy-url", compact=True, flat=True)
                         with Vertical(id="progress-panel", classes="panel grow"):
                             yield Label("Current drop")
                             yield Static("", id="drop-title")
@@ -222,26 +223,26 @@ class TwitchDropsTUI(App[None]):
                                 compact=True,
                             )
                             yield Static(
-                                "farm unlinked works only with priority-only mode",
+                                "Only for priority-only mode.",
                                 id="farm-unlinked-note",
                             )
                             yield Label("Available game")
                             yield Select([], prompt="Select game", id="game-select")
                             with Horizontal(classes="action-row"):
-                                yield Button("+ priority", id="add-priority")
-                                yield Button("+ exclude", id="add-exclude")
-                            yield Button("reload", id="reload")
+                                yield Button("+ priority", id="add-priority", compact=True, flat=True)
+                                yield Button("+ exclude", id="add-exclude", compact=True, flat=True)
+                            yield Button("reload", id="reload", compact=True, flat=True)
                         with Vertical(classes="compact-panel grow"):
                             yield Label("Priority")
                             yield DataTable(id="priority-table")
                             with Horizontal(classes="action-row"):
-                                yield Button("up", id="priority-up")
-                                yield Button("down", id="priority-down")
-                                yield Button("remove", id="remove-priority")
+                                yield Button("up", id="priority-up", compact=True, flat=True)
+                                yield Button("down", id="priority-down", compact=True, flat=True)
+                                yield Button("remove", id="remove-priority", compact=True, flat=True)
                         with Vertical(classes="compact-panel grow"):
                             yield Label("Exclude")
                             yield DataTable(id="exclude-table")
-                            yield Button("remove", id="remove-exclude")
+                            yield Button("remove", id="remove-exclude", compact=True, flat=True)
             with TabPane("Logs", id="logs-tab"):
                 yield Log(id="full-log", highlight=True)
         yield Footer()
@@ -257,6 +258,7 @@ class TwitchDropsTUI(App[None]):
 
     def on_unmount(self) -> None:
         self._ready_for_refresh = False
+        self._on_close()
 
     def _setup_tables(self) -> None:
         campaigns = self.query_one("#campaigns-table", DataTable)
@@ -480,6 +482,7 @@ class TwitchDropsTUI(App[None]):
         return str(row_key.value)
 
     def action_request_quit(self) -> None:
+        self.exit()
         self._on_close()
 
     def action_reload(self) -> None:
@@ -549,14 +552,17 @@ class TwitchDropsTUI(App[None]):
         if self._syncing_settings:
             return
         if event.select.id == "priority-mode-select" and event.value != Select.NULL:
-            self._on_set_priority_mode(str(event.value))
+            mode_name = str(event.value)
+            if mode_name != self.state.priority_mode:
+                self._on_set_priority_mode(mode_name)
 
     def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
         if self._syncing_settings:
             return
         checkbox_id = event.checkbox.id
         if checkbox_id == "farm-unlinked":
-            self._on_set_farm_unlinked(event.value)
+            if event.value != self.state.farm_unlinked:
+                self._on_set_farm_unlinked(event.value)
             return
         filters = self.state.campaign_filters
         if checkbox_id == "filter-not-linked":
