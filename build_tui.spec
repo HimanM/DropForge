@@ -25,6 +25,7 @@ for lang_filepath in WORKING_DIR.joinpath("lang").glob("*.json"):
         datas.append((str(lang_filepath), "lang"))
 
 hiddenimports = [
+    "tui.cli",
     "textual.drivers.headless_driver",
     "textual.drivers.linux_driver",
     "textual.drivers.linux_inline_driver",

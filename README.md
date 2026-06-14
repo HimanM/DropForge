@@ -30,7 +30,11 @@ Every several seconds, the application pretends to watch a particular stream by 
 
 ### Terminal UI (`tdminer`):
 
-This fork also ships a Textual-based terminal UI for users who want a keyboard-friendly app that can run over SSH or on a headless Linux/macOS box. It keeps the regular GUI build intact. The TUI is not shipped for Windows; use the regular GUI build there.
+This fork also ships terminal frontends for users who want a CLI-friendly app that can run over SSH or on a headless box. It keeps the regular GUI build intact.
+
+- `tdminer` chooses the best terminal frontend for the platform.
+- `tdminer tui` starts the richer Textual interface on Linux/macOS.
+- `tdminer cli` starts the portable prompt-based interface for Windows, Termux-style shells, and terminals where full-screen TUIs do not behave well.
 
 Install the latest TUI release on Linux or macOS:
 
@@ -44,6 +48,12 @@ Run it after installing:
 tdminer
 ```
 
+Run the portable command interface explicitly:
+
+```sh
+tdminer cli
+```
+
 The TUI login uses Twitch device activation. When login is needed, `tdminer` shows the activation URL and user code in the terminal. You can open the URL from the TUI, copy it, or manually paste/type it on another machine; this works for headless Linux sessions where no browser is available.
 
 Useful TUI shortcuts:
@@ -54,9 +64,17 @@ Useful TUI shortcuts:
 - `b` opens the Twitch login URL when a device-code login is pending.
 - `c` copies the Twitch login URL when a device-code login is pending.
 
+Useful portable CLI commands:
+
+- `/dashboard` shows status and current drop progress.
+- `/channels next` and `/channels prev` scroll the capped channel dashboard.
+- `/drops next` and `/drops prev` scroll the capped campaigns dashboard.
+- `/filter expired on` toggles campaign filters.
+- `/settings`, `/logs`, `/reload`, and `/quit` handle the common actions.
+
 The release workflow builds and publishes separate TUI assets for macOS, Linux x86_64, and Linux aarch64. The install script always fetches the latest matching `tdminer` asset from GitHub Releases.
 
-The release binaries are self-contained PyInstaller executables, so users do not need to install Python or Python packages first. Native Termux on Android is not supported by the release installer because Termux does not use glibc Linux binaries. Advanced users may be able to run it inside a proot Ubuntu/Debian environment, but native mobile support is not a release target yet.
+The release binaries are self-contained PyInstaller executables, so users do not need to install Python or Python packages first. Native Termux on Android is not supported by the release installer because Termux does not use glibc Linux binaries. Advanced users can run from source in Termux with Python 3.10+ and the project dependencies installed, or use a proot Ubuntu/Debian environment with the release installer.
 
 ### Pictures:
 

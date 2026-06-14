@@ -16,6 +16,7 @@ from core.settings import Settings
 from core.translate import _
 from core.utils import lock_file
 from network.twitch import Twitch
+from tui.cli import PortableCLIManager
 from tui.manager import TUIManager
 from version import __version__
 
@@ -54,6 +55,7 @@ class ParsedArgs(argparse.Namespace):
     log: bool
     tray: bool
     dump: bool
+    frontend: str
 
     @property
     def logging_level(self) -> int:
@@ -82,6 +84,13 @@ def parse_args(argv: list[str] | None = None) -> ParsedArgs:
         description="A terminal UI for mining timed Twitch drops.",
     )
     parser.add_argument("--version", action="version", version=f"v{__version__}")
+    parser.add_argument(
+        "frontend",
+        nargs="?",
+        choices=("auto", "tui", "cli"),
+        default="auto",
+        help="Frontend to run. Use cli for portable Windows/Termux-style terminals.",
+    )
     parser.add_argument("-v", dest="_verbose", action="count", default=0)
     parser.add_argument("--log", action="store_true")
     parser.add_argument("--dump", action="store_true")
@@ -104,17 +113,29 @@ def configure_logging(settings: Settings) -> None:
     logging.getLogger("TwitchDrops.websocket").setLevel(settings.debug_ws)
 
 
-async def run_client(settings: Settings) -> int:
+def frontend_factory(name: str):
+    if name == "cli":
+        return PortableCLIManager
+    if name == "tui":
+        return TUIManager
+    if sys.platform == "win32":
+        return PortableCLIManager
+    return TUIManager
+
+
+async def run_client(settings: Settings, *, frontend: str = "auto") -> int:
     try:
         _.set_language(settings.language)
     except ValueError:
         pass
 
     configure_logging(settings)
-    client = Twitch(settings, gui_factory=TUIManager)
+    client = Twitch(settings, gui_factory=frontend_factory(frontend))
     loop = asyncio.get_running_loop()
-    loop.add_signal_handler(signal.SIGINT, lambda *_: client.gui.close())
-    loop.add_signal_handler(signal.SIGTERM, lambda *_: client.gui.close())
+    supports_signals = sys.platform != "win32"
+    if supports_signals:
+        loop.add_signal_handler(signal.SIGINT, lambda *_: client.gui.close())
+        loop.add_signal_handler(signal.SIGTERM, lambda *_: client.gui.close())
 
     exit_status = 0
     try:
@@ -129,8 +150,9 @@ async def run_client(settings: Settings) -> int:
         client.print("Fatal error encountered:")
         client.print(traceback.format_exc())
     finally:
-        loop.remove_signal_handler(signal.SIGINT)
-        loop.remove_signal_handler(signal.SIGTERM)
+        if supports_signals:
+            loop.remove_signal_handler(signal.SIGINT)
+            loop.remove_signal_handler(signal.SIGTERM)
         client.print(_("gui", "status", "exiting"))
         await client.shutdown()
 
@@ -148,7 +170,8 @@ async def run_client(settings: Settings) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    if sys.platform == "win32":
+    args = parse_args(argv)
+    if sys.platform == "win32" and args.frontend == "tui":
         raise SystemExit(
             "tdminer TUI is only supported on Linux and macOS. Use the GUI build on Windows."
         )
@@ -158,12 +181,11 @@ def main(argv: list[str] | None = None) -> int:
     if sys.version_info < (3, 10):
         raise RuntimeError("Python 3.10 or higher is required")
 
-    args = parse_args(argv)
     settings = Settings(args)
     success, file = lock_file(LOCK_PATH)
     if not success:
         return 3
     try:
-        return asyncio.run(run_client(settings))
+        return asyncio.run(run_client(settings, frontend=args.frontend))
     finally:
         file.close()

@@ -454,7 +454,9 @@ jobs:
             curl -fsSL https://raw.githubusercontent.com/HimanM/TwitchDropsMiner/main/scripts/install.sh | sh
             ```
 
-            The `tdminer` TUI release binaries are self-contained and do not require users to install Python first. Native Termux on Android is not supported by these glibc Linux release assets.
+            Run `tdminer tui` for the richer Linux/macOS Textual interface, or `tdminer cli` for the portable prompt-based interface used by Windows/source installs and Termux-style terminals.
+
+            The `tdminer` release binaries are self-contained and do not require users to install Python first. Native Termux on Android is not supported by these glibc Linux release assets; use source installs or a proot Linux environment there.
           name: "Release v${{steps.vars.outputs.app_version}}"
           prerelease: false
           removeArtifacts: true
