@@ -30,8 +30,8 @@ class PortableCLITests(unittest.TestCase):
         )
         return PortableCLIManager(twitch)
 
-    def render_text(self, renderable) -> str:
-        console = Console(record=True, width=120, color_system=None, file=StringIO())
+    def render_text(self, renderable, *, width=120) -> str:
+        console = Console(record=True, width=width, color_system=None, file=StringIO())
         console.print(renderable)
         return console.export_text()
 
@@ -64,6 +64,27 @@ class PortableCLITests(unittest.TestCase):
         self.assertNotIn("channel-10", first_page)
         self.assertIn("channel-10", second_page)
         self.assertIn("/channels next", first_page)
+
+    def test_channels_view_removes_columns_in_narrow_terminals(self):
+        manager = self.make_manager()
+        manager._console = Console(width=56, file=StringIO())
+        manager.state.channels["1"] = ChannelSnapshot(
+            iid="1",
+            name="channel-1",
+            status="ONLINE",
+            game="Very Long Game",
+            viewers="999",
+            drops=True,
+            acl_based=True,
+            watching=False,
+        )
+
+        text = self.render_text(manager._channels_view(), width=56)
+
+        self.assertIn("channel-1", text)
+        self.assertIn("drops", text)
+        self.assertNotIn("viewers", text)
+        self.assertNotIn("acl", text)
 
     def test_drops_view_is_capped_scrollable_and_filterable(self):
         manager = self.make_manager()
@@ -117,6 +138,35 @@ class PortableCLITests(unittest.TestCase):
         self.assertIn("Campaign 8", second_page)
         self.assertIn("Expired Campaign", filtered)
         self.assertIn("/drops next", first_page)
+
+    def test_drops_view_removes_columns_in_narrow_terminals(self):
+        manager = self.make_manager()
+        manager._console = Console(width=56, file=StringIO())
+        manager.state.campaigns["1"] = CampaignSnapshot(
+            id="1",
+            name="Long Campaign",
+            game="Game",
+            status="Active",
+            linked=True,
+            active=True,
+            upcoming=False,
+            expired=False,
+            excluded=False,
+            finished=False,
+            required_minutes=60,
+            progress=0.25,
+            drops=("Reward",),
+            starts="-",
+            ends="-",
+            allowed_channels="-",
+        )
+
+        text = self.render_text(manager._drops_view(), width=56)
+
+        self.assertIn("Game", text)
+        self.assertIn("progress", text)
+        self.assertNotIn(" yes ", text)
+        self.assertNotIn("Long Campaign", text)
 
 
 if __name__ == "__main__":

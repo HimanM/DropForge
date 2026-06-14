@@ -5,11 +5,8 @@ import webbrowser
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from prompt_toolkit import PromptSession
-from prompt_toolkit.patch_stdout import patch_stdout
 from rich import box
-from rich.console import Group
-from rich.live import Live
+from rich.console import Console, Group
 from rich.panel import Panel
 from rich.progress import BarColumn, Progress, TextColumn
 from rich.table import Table
@@ -35,16 +32,15 @@ class PortableCLIManager(TUIManager):
         self._channel_offset = 0
         self._campaign_offset = 0
         self._selected_channel: str | None = None
-        self._session: PromptSession[str] | None = None
-        self._render_task: asyncio.Task[None] | None = None
+        self._console: Console | None = None
         self._command_task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
-        if self._render_task is not None and not self._render_task.done():
+        if self._command_task is not None and not self._command_task.done():
             return
         self._app_ready.clear()
-        self._session = PromptSession("> ")
-        self._render_task = asyncio.create_task(self._render_loop())
+        self._console = Console()
+        self._draw()
         self._command_task = asyncio.create_task(self._command_loop())
         self._app_ready.set()
 
@@ -53,9 +49,8 @@ class PortableCLIManager(TUIManager):
 
     def stop(self) -> None:
         super().stop()
-        for task in (self._render_task, self._command_task):
-            if task is not None:
-                task.cancel()
+        if self._command_task is not None:
+            self._command_task.cancel()
 
     def close_window(self) -> None:
         self.stop()
@@ -72,7 +67,7 @@ class PortableCLIManager(TUIManager):
         return None
 
     def refresh_login(self) -> None:
-        return None
+        self._draw()
 
     def refresh_progress(self) -> None:
         return None
@@ -86,22 +81,27 @@ class PortableCLIManager(TUIManager):
     def refresh_settings(self) -> None:
         return None
 
-    async def _render_loop(self) -> None:
-        with Live(self._render(), refresh_per_second=4, screen=False) as live:
-            while not self.close_requested:
-                live.update(self._render())
-                await asyncio.sleep(0.5)
-
     async def _command_loop(self) -> None:
-        assert self._session is not None
-        with patch_stdout():
-            while not self.close_requested:
-                try:
-                    raw = await self._session.prompt_async()
-                except (EOFError, KeyboardInterrupt):
-                    self.close()
-                    return
-                self._handle_command(raw.strip())
+        while not self.close_requested:
+            try:
+                raw = await asyncio.to_thread(input, "tdminer> ")
+            except (EOFError, KeyboardInterrupt):
+                self.close()
+                return
+            self._handle_command(raw.strip())
+            if not self.close_requested:
+                self._draw()
+
+    def _draw(self) -> None:
+        if self._console is not None:
+            self._console.rule("[bold bright_cyan]Twitch Drops Miner[/] [orange1]by HimanM[/]")
+            self._console.print(self._render())
+
+    @property
+    def _terminal_width(self) -> int:
+        if self._console is not None:
+            return self._console.width
+        return 120
 
     def _handle_command(self, raw: str) -> None:
         if not raw:
@@ -285,6 +285,12 @@ class PortableCLIManager(TUIManager):
         return Panel(content, title="[bright_cyan]login[/]", border_style="bright_cyan")
 
     def _dashboard_view(self) -> Group:
+        if self._terminal_width < 96:
+            return Group(
+                self._status_panel(),
+                self._drop_panel(self.state.current_drop),
+                self._recent_logs_panel(),
+            )
         table = Table.grid(expand=True)
         table.add_column(ratio=1)
         table.add_column(ratio=2)
@@ -329,10 +335,25 @@ class PortableCLIManager(TUIManager):
         channels = list(self.state.channels.values())
         page = channels[self._channel_offset : self._channel_offset + self.CHANNEL_PAGE_SIZE]
         table = Table(box=box.SIMPLE_HEAVY, expand=True)
-        for column in ("", "channel", "status", "game", "drops", "viewers", "acl"):
+        if self._terminal_width < 64:
+            columns = ("", "channel", "status", "drops")
+        elif self._terminal_width < 90:
+            columns = ("", "channel", "status", "game", "drops")
+        else:
+            columns = ("", "channel", "status", "game", "drops", "viewers", "acl")
+        for column in columns:
             table.add_column(column, overflow="fold")
         for channel in page:
             marker = ">" if channel.watching else " "
+            row = {
+                "": marker,
+                "channel": channel.name,
+                "status": channel.status,
+                "game": channel.game,
+                "drops": "yes" if channel.drops else "no",
+                "viewers": channel.viewers,
+                "acl": "yes" if channel.acl_based else "no",
+            }
             status = channel.status.lower()
             if channel.watching:
                 style = "bold black on bright_cyan"
@@ -342,7 +363,7 @@ class PortableCLIManager(TUIManager):
                 style = "yellow"
             else:
                 style = "dim"
-            table.add_row(marker, *channel.row, style=style)
+            table.add_row(*(row[column] for column in columns), style=style)
         title = f"channels {self._page_label(self._channel_offset, self.CHANNEL_PAGE_SIZE, len(channels))}"
         hint = Text(
             f"Showing {len(page)} rows. Scroll with /channels next or /channels prev.",
@@ -358,16 +379,25 @@ class PortableCLIManager(TUIManager):
         )
         page = campaigns[self._campaign_offset : self._campaign_offset + self.CAMPAIGN_PAGE_SIZE]
         table = Table(box=box.SIMPLE_HEAVY, expand=True)
-        for column in ("game", "campaign", "status", "linked", "progress", "drops"):
+        if self._terminal_width < 64:
+            columns = ("game", "status", "progress")
+        elif self._terminal_width < 92:
+            columns = ("game", "campaign", "progress", "drops")
+        else:
+            columns = ("game", "campaign", "status", "linked", "progress", "drops")
+        for column in columns:
             table.add_column(column, overflow="fold")
         for campaign in page:
+            row = {
+                "game": campaign.game,
+                "campaign": campaign.name,
+                "status": campaign.status,
+                "linked": "yes" if campaign.linked else "no",
+                "progress": campaign.percent,
+                "drops": str(len(campaign.drops)),
+            }
             table.add_row(
-                campaign.game,
-                campaign.name,
-                campaign.status,
-                "yes" if campaign.linked else "no",
-                campaign.percent,
-                str(len(campaign.drops)),
+                *(row[column] for column in columns),
                 style="green" if campaign.active else "yellow" if campaign.upcoming else "dim",
             )
         title = f"drops {self._page_label(self._campaign_offset, self.CAMPAIGN_PAGE_SIZE, len(campaigns))}"

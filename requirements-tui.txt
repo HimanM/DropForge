@@ -1,5 +1,4 @@
 aiohttp>=3.9,<4.0
 truststore
 rich>=13,<15
-prompt_toolkit>=3,<4
 textual>=8.2,<9
