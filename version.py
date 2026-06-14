@@ -1,1 +1,1 @@
-__version__ = "18.Opinionated By @HimanM"
+__version__ = "18.Opinionated_By_HimanM"
