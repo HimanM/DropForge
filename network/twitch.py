@@ -729,6 +729,7 @@ class Twitch:
                 else:
                     # with no games available, we switch to IDLE after cleanup
                     self.print(_("status", "no_campaign"))
+                    self.print(self._idle_campaign_summary())
                     self.change_state(State.IDLE)
             elif self._state is State.CHANNELS_FETCH:
                 self.gui.status.update(_("gui", "status", "gathering"))
@@ -873,6 +874,7 @@ class Twitch:
                 else:
                     # not watching anything and there isn't anything to watch either
                     self.print(_("status", "no_channel"))
+                    self.print(self._idle_channel_summary())
                     self.change_state(State.IDLE)
                 del new_watching, selected_channel, watching_channel
             elif self._state is State.EXIT:
@@ -1017,6 +1019,40 @@ class Twitch:
             ):
                 return True
         return False
+
+    def _idle_campaign_summary(self) -> str:
+        next_hour = datetime.now(timezone.utc) + timedelta(hours=1)
+        earnable = [
+            campaign.game.name
+            for campaign in self.inventory
+            if campaign.can_earn_within(next_hour)
+        ]
+        priority = list(self.settings.priority)
+        exclude = sorted(self.settings.exclude)
+        wanted = [game.name for game in self.wanted_games]
+        return (
+            "Idle details: "
+            f"wanted={wanted or '-'}, "
+            f"earnable={earnable[:6] or '-'}, "
+            f"priority={priority[:6] or '-'}, "
+            f"exclude={exclude[:6] or '-'}"
+        )
+
+    def _idle_channel_summary(self) -> str:
+        channels = list(self.channels.values())
+        online = [channel for channel in channels if channel.online]
+        drops_enabled = [channel for channel in online if channel.drops_enabled]
+        watchable = [channel for channel in online if self.can_watch(channel)]
+        wanted = [game.name for game in self.wanted_games]
+        online_names = [channel.name for channel in online[:6]]
+        return (
+            "Idle details: "
+            f"wanted={wanted or '-'}, "
+            f"channels={len(channels)}, "
+            f"online={len(online)} {online_names or '-'}, "
+            f"drops_enabled={len(drops_enabled)}, "
+            f"watchable={len(watchable)}"
+        )
 
     def should_switch(self, channel: Channel) -> bool:
         """

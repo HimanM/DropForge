@@ -82,5 +82,38 @@ class TUIManagerRegressionTests(unittest.TestCase):
         self.assertTrue(any("hello" in line for line in manager.state.logs))
 
 
+class IdleDiagnosticsTests(unittest.TestCase):
+    def test_idle_channel_summary_counts_watchability(self):
+        twitch = Twitch.__new__(Twitch)
+        twitch.wanted_games = [SimpleNamespace(name="Game")]
+        twitch.channels = {
+            1: SimpleNamespace(name="one", online=True, drops_enabled=True),
+            2: SimpleNamespace(name="two", online=True, drops_enabled=False),
+            3: SimpleNamespace(name="three", online=False, drops_enabled=False),
+        }
+        twitch.can_watch = lambda channel: channel.name == "one"
+
+        text = Twitch._idle_channel_summary(twitch)
+
+        self.assertIn("channels=3", text)
+        self.assertIn("online=2", text)
+        self.assertIn("drops_enabled=1", text)
+        self.assertIn("watchable=1", text)
+
+    def test_idle_campaign_summary_includes_settings(self):
+        twitch = Twitch.__new__(Twitch)
+        twitch.wanted_games = []
+        twitch.settings = SimpleNamespace(priority=["Game"], exclude={"Other"})
+        twitch.inventory = [
+            SimpleNamespace(game=SimpleNamespace(name="Game"), can_earn_within=lambda _until: True)
+        ]
+
+        text = Twitch._idle_campaign_summary(twitch)
+
+        self.assertIn("earnable=['Game']", text)
+        self.assertIn("priority=['Game']", text)
+        self.assertIn("exclude=['Other']", text)
+
+
 if __name__ == "__main__":
     unittest.main()
