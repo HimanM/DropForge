@@ -272,7 +272,7 @@ class TwitchDropsTUI(App[None]):
     def _setup_tables(self) -> None:
         campaigns = self.query_one("#campaigns-table", DataTable)
         campaigns.zebra_stripes = True
-        campaigns.add_columns("Game", "Campaign", "Status", "Linked", "Progress", "Drops")
+        campaigns.add_columns("Game", "Campaign", "Status", "Linked", "Progress", "Allowed", "Drops")
 
         channels = self.query_one("#channels-table", DataTable)
         channels.zebra_stripes = True
@@ -403,6 +403,7 @@ class TwitchDropsTUI(App[None]):
                 campaign.status,
                 "yes" if campaign.linked else "no",
                 campaign.percent,
+                campaign.allowed_channels,
                 "\n".join(campaign.drops),
                 key=campaign.id,
             )

@@ -523,16 +523,21 @@ class PortableCLIManager(TUIManager):
             lines.append(f"{'game':22} {'status':10} {'progress':8}")
             for campaign in page:
                 lines.append(f"{campaign.game[:22]:22} {campaign.status[:10]:10} {campaign.percent:8}")
+                if campaign.allowed_channels:
+                    lines.append(f"  allowed {campaign.allowed_channels}"[:width])
         elif width < 92:
-            lines.append(f"{'game':18} {'campaign':30} {'progress':8} {'drops':5}")
-            for campaign in page:
-                lines.append(f"{campaign.game[:18]:18} {campaign.name[:30]:30} {campaign.percent:8} {len(campaign.drops):5}")
-        else:
-            lines.append(f"{'game':18} {'campaign':32} {'status':10} {'linked':6} {'progress':8} {'drops':5}")
+            lines.append(f"{'game':18} {'campaign':26} {'progress':8} {'allowed':20}")
             for campaign in page:
                 lines.append(
-                    f"{campaign.game[:18]:18} {campaign.name[:32]:32} {campaign.status[:10]:10} "
-                    f"{'yes' if campaign.linked else 'no':6} {campaign.percent:8} {len(campaign.drops):5}"
+                    f"{campaign.game[:18]:18} {campaign.name[:26]:26} "
+                    f"{campaign.percent:8} {campaign.allowed_channels[:20]:20}"
+                )
+        else:
+            lines.append(f"{'game':16} {'campaign':28} {'status':10} {'linked':6} {'progress':8} {'allowed':24}")
+            for campaign in page:
+                lines.append(
+                    f"{campaign.game[:16]:16} {campaign.name[:28]:28} {campaign.status[:10]:10} "
+                    f"{'yes' if campaign.linked else 'no':6} {campaign.percent:8} {campaign.allowed_channels[:24]:24}"
                 )
         filters = self.state.campaign_filters
         lines.append(

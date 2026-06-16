@@ -242,6 +242,33 @@ class PortableCLITests(unittest.TestCase):
         self.assertIn("Expired Campaign", filtered)
         self.assertIn("expired=on", filtered)
 
+    def test_drops_view_shows_allowed_offline_channels(self):
+        manager = self.make_manager()
+        manager.state.campaigns["1"] = CampaignSnapshot(
+            id="1",
+            name="Single Streamer Campaign",
+            game="Game",
+            status="Active",
+            linked=True,
+            active=True,
+            upcoming=False,
+            expired=False,
+            excluded=False,
+            finished=False,
+            required_minutes=60,
+            progress=0.25,
+            drops=("Reward",),
+            starts="-",
+            ends="-",
+            allowed_channels="OfflineStreamer",
+        )
+
+        wide = "\n".join(manager._drops_lines(120))
+        narrow = "\n".join(manager._drops_lines(56))
+
+        self.assertIn("OfflineStreamer", wide)
+        self.assertIn("OfflineStreamer", narrow)
+
     def test_drops_view_removes_columns_in_narrow_terminals(self):
         manager = self.make_manager()
         manager.state.campaigns["1"] = CampaignSnapshot(

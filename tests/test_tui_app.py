@@ -155,6 +155,34 @@ class TUIApplicationTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(table.row_count, 2)
 
+    async def test_campaign_table_shows_allowed_offline_channels(self):
+        state = TUIState()
+        state.campaigns["active"] = CampaignSnapshot(
+            id="active",
+            name="Single Streamer Campaign",
+            game="Game",
+            status="Active",
+            linked=True,
+            active=True,
+            upcoming=False,
+            expired=False,
+            excluded=False,
+            finished=False,
+            required_minutes=60,
+            progress=0.5,
+            drops=("Reward",),
+            starts="-",
+            ends="-",
+            allowed_channels="OfflineStreamer",
+        )
+        app = self.make_app(state)
+
+        async with app.run_test(size=(120, 30)) as pilot:
+            await pilot.pause()
+            table = app.query_one("#campaigns-table")
+
+            self.assertIn("OfflineStreamer", " ".join(map(str, table.get_row("active"))))
+
     async def test_campaign_filter_controls_are_visible(self):
         app = self.make_app()
 
