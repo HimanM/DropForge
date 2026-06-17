@@ -5,6 +5,16 @@ REPO="${TDMINER_REPO:-HimanM/TwitchDropsMiner}"
 REF="${TDMINER_REF:-main}"
 INSTALL_DIR="${TDMINER_INSTALL_DIR:-$HOME/.local/bin}"
 APP_DIR="${TDMINER_APP_DIR:-$HOME/.local/share/tdminer}"
+DATA_DIR="$APP_DIR/data"
+
+migrate_data_file() {
+  src="$1"
+  name="$2"
+  if [ -e "$src/$name" ] && [ ! -e "$DATA_DIR/$name" ]; then
+    mkdir -p "$DATA_DIR"
+    mv "$src/$name" "$DATA_DIR/$name"
+  fi
+}
 
 os="$(uname -s)"
 arch="$(uname -m)"
@@ -42,8 +52,14 @@ if [ -n "${TERMUX_VERSION:-}" ] || [ -n "${ANDROID_ROOT:-}" ]; then
     exit 1
   fi
 
+  mkdir -p "$APP_DIR" "$INSTALL_DIR" "$DATA_DIR"
+  migrate_data_file "$APP_DIR/source" "cookies.jar"
+  migrate_data_file "$APP_DIR/source" "settings.json"
+  if [ -d "$APP_DIR/source/cache" ] && [ ! -d "$DATA_DIR/cache" ]; then
+    mv "$APP_DIR/source/cache" "$DATA_DIR/cache"
+  fi
+
   rm -rf "$APP_DIR/source"
-  mkdir -p "$APP_DIR" "$INSTALL_DIR"
   mv "$extracted" "$APP_DIR/source"
 
   python3 -m venv "$APP_DIR/venv"
@@ -55,11 +71,13 @@ if [ -n "${TERMUX_VERSION:-}" ] || [ -n "${ANDROID_ROOT:-}" ]; then
 if [ "\$#" -eq 0 ]; then
   set -- cli
 fi
+export TDMINER_DATA_DIR="$DATA_DIR"
 exec "$APP_DIR/venv/bin/python" "$APP_DIR/source/tdminer.py" "\$@"
 EOF
   chmod +x "$INSTALL_DIR/tdminer"
 
   echo "Installed tdminer source launcher to $INSTALL_DIR/tdminer"
+  echo "Persistent data: $DATA_DIR"
   echo "Run: tdminer"
   echo "Run explicitly: tdminer cli"
   exit 0
@@ -95,7 +113,7 @@ url="https://github.com/$REPO/releases/latest/download/$asset"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
-mkdir -p "$INSTALL_DIR"
+mkdir -p "$INSTALL_DIR" "$APP_DIR/bin" "$DATA_DIR"
 echo "Downloading $url"
 curl -fL "$url" -o "$tmp_dir/tdminer.zip"
 unzip -q "$tmp_dir/tdminer.zip" -d "$tmp_dir"
@@ -106,10 +124,24 @@ if [ -z "$found" ]; then
   exit 1
 fi
 
-cp "$found" "$INSTALL_DIR/tdminer"
+migrate_data_file "$INSTALL_DIR" "cookies.jar"
+migrate_data_file "$INSTALL_DIR" "settings.json"
+if [ -d "$INSTALL_DIR/cache" ] && [ ! -d "$DATA_DIR/cache" ]; then
+  mv "$INSTALL_DIR/cache" "$DATA_DIR/cache"
+fi
+
+cp "$found" "$APP_DIR/bin/tdminer"
+chmod +x "$APP_DIR/bin/tdminer"
+
+cat > "$INSTALL_DIR/tdminer" <<EOF
+#!/usr/bin/env sh
+export TDMINER_DATA_DIR="$DATA_DIR"
+exec "$APP_DIR/bin/tdminer" "\$@"
+EOF
 chmod +x "$INSTALL_DIR/tdminer"
 
 echo "Installed tdminer to $INSTALL_DIR/tdminer"
+echo "Persistent data: $DATA_DIR"
 case ":$PATH:" in
   *":$INSTALL_DIR:"*) ;;
   *)
