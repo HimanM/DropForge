@@ -81,6 +81,24 @@ class TUIApplicationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.query_one("#drop-bar").progress, 40)
             self.assertEqual(app.query_one("#campaign-bar").progress, 80)
 
+    async def test_priority_buttons_use_bump_and_demote_labels(self):
+        app = self.make_app()
+
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            self.assertEqual("bump", app.query_one("#priority-up").label)
+            self.assertEqual("demote", app.query_one("#priority-down").label)
+
+    def test_priority_buttons_call_move_callback_with_expected_offsets(self):
+        calls = []
+        app = self.make_app(on_move_priority_game=lambda game, offset: calls.append((game, offset)))
+
+        with patch.object(app, "_selected_table_key", return_value="Game A"):
+            app.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="priority-up")))
+            app.on_button_pressed(SimpleNamespace(button=SimpleNamespace(id="priority-down")))
+
+        self.assertEqual([("Game A", -1), ("Game A", 1)], calls)
+
     async def test_app_mounts_in_narrow_terminal(self):
         app = self.make_app()
 

@@ -41,6 +41,8 @@ class PortableCLITests(unittest.TestCase):
         self.assertIn("/channels next", PortableCLIManager.COMMANDS)
         self.assertIn("/filter expired on", PortableCLIManager.COMMANDS)
         self.assertIn("/quit", PortableCLIManager.COMMANDS)
+        self.assertIn("/priority bump", PortableCLIManager.COMMANDS)
+        self.assertIn("/priority demote", PortableCLIManager.COMMANDS)
 
     def test_command_completer_triggers_from_slash_prefix(self):
         completer = CommandCompleter(PortableCLIManager.COMMANDS)
@@ -103,6 +105,8 @@ class PortableCLITests(unittest.TestCase):
         )
 
         self.assertEqual(["Overwatch"], manager._completion_candidates("/priority add"))
+        self.assertEqual(["Sports"], manager._completion_candidates("/priority bump"))
+        self.assertEqual(["Sports"], manager._completion_candidates("/priority demote"))
         self.assertEqual(["channel-one"], manager._completion_candidates("/switch"))
 
     def test_switch_command_accepts_channel_name(self):
@@ -120,6 +124,18 @@ class PortableCLITests(unittest.TestCase):
         manager._handle_command("/switch channel-one")
 
         self.assertEqual("1", manager.selected_channel_id())
+
+    def test_priority_bump_and_demote_reorder_the_list(self):
+        manager = self.make_manager()
+        manager._twitch.settings.priority = ["Game A", "Game B", "Game C"]
+        manager._update_settings_text()
+
+        manager._handle_command("/priority bump Game B")
+        manager._handle_command("/priority demote Game B")
+        manager._handle_command("/priority demote Game B")
+
+        self.assertEqual(["Game A", "Game C", "Game B"], manager.state.priority)
+        self.assertTrue(manager._twitch.settings.saved)
 
     def test_print_logs_without_textual_app(self):
         manager = self.make_manager()

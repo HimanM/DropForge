@@ -245,8 +245,8 @@ class TwitchDropsTUI(App[None]):
                             yield Label("Priority")
                             yield DataTable(id="priority-table")
                             with Horizontal(classes="action-row"):
-                                yield Button("up", id="priority-up", compact=True, flat=True)
-                                yield Button("down", id="priority-down", compact=True, flat=True)
+                                yield Button("bump", id="priority-up", compact=True, flat=True)
+                                yield Button("demote", id="priority-down", compact=True, flat=True)
                                 yield Button("remove", id="remove-priority", compact=True, flat=True)
                         with Vertical(classes="compact-panel grow"):
                             yield Label("Exclude")

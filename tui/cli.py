@@ -92,6 +92,8 @@ class PortableCLIManager(TUIManager):
         "/switch",
         "/priority add",
         "/priority remove",
+        "/priority bump",
+        "/priority demote",
         "/exclude add",
         "/exclude remove",
         "/mode",
@@ -291,6 +293,7 @@ class PortableCLIManager(TUIManager):
             self.print(
                 "Commands: /dashboard /channels [next|prev] /drops [next|prev] "
                 "/settings /logs /reload /switch <channel-id> /priority add <game> "
+                "/priority remove <game> /priority bump <game> /priority demote <game> "
                 "/exclude add <game> /mode <priority-only|ending-soonest|low-availability> "
                 "/filter <expired|finished|excluded|upcoming|not-linked> <on|off> /quit"
             )
@@ -301,7 +304,7 @@ class PortableCLIManager(TUIManager):
         if command == "/priority add":
             existing = set(self.state.priority)
             return [game for game in self.state.available_games if game not in existing]
-        if command == "/priority remove":
+        if command in {"/priority remove", "/priority bump", "/priority demote"}:
             return list(self.state.priority)
         if command == "/exclude add":
             existing = set(self.state.exclude)
@@ -365,8 +368,14 @@ class PortableCLIManager(TUIManager):
             self._add_priority_game(game.strip())
         elif action == "remove":
             self._remove_priority_game(game.strip())
+        elif action in {"bump", "up"}:
+            self._move_priority_game(game.strip(), -1)
+        elif action in {"demote", "down"}:
+            self._move_priority_game(game.strip(), 1)
         else:
-            self.print("Usage: /priority add <game> or /priority remove <game>")
+            self.print(
+                "Usage: /priority add <game> | /priority remove <game> | /priority bump <game> | /priority demote <game>"
+            )
 
     def _handle_exclude(self, rest: str) -> None:
         action, _, game = rest.partition(" ")
@@ -556,7 +565,9 @@ class PortableCLIManager(TUIManager):
             f"priority       {', '.join(self.state.priority) or '-'}",
             f"exclude        {', '.join(self.state.exclude) or '-'}",
             "",
-            "/priority add <game>  /exclude add <game>  /mode <name>",
+            "/priority add <game>  /priority remove <game>",
+            "/priority bump <game>  /priority demote <game>",
+            "/exclude add <game>  /mode <name>",
             "/farm-unlinked on|off  (only works in priority-only mode)",
         ]
         return [line[:width] for line in lines]
