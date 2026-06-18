@@ -201,9 +201,9 @@ class PortableCLITests(unittest.TestCase):
         text = "\n".join(manager._channels_lines(56))
 
         self.assertIn("channel-1", text)
-        self.assertIn("drop", text)
-        self.assertNotIn("viewers", text)
-        self.assertNotIn("acl", text)
+        self.assertIn("Drop", text)
+        self.assertNotIn("Viewers", text)
+        self.assertNotIn("ACL", text)
 
     def test_drops_view_is_capped_scrollable_and_filterable(self):
         manager = self.make_manager()
@@ -283,7 +283,8 @@ class PortableCLITests(unittest.TestCase):
         narrow = "\n".join(manager._drops_lines(56))
 
         self.assertIn("OfflineStreamer", wide)
-        self.assertIn("OfflineStreamer", narrow)
+        # Allowed column is hidden on narrow terminals (< 92 cols)
+        self.assertNotIn("OfflineStreamer", narrow)
 
     def test_drops_view_removes_columns_in_narrow_terminals(self):
         manager = self.make_manager()
@@ -309,7 +310,7 @@ class PortableCLITests(unittest.TestCase):
         text = "\n".join(manager._drops_lines(56))
 
         self.assertIn("Game", text)
-        self.assertIn("progress", text)
+        self.assertIn("Progress", text)
         self.assertNotIn(" yes ", text)
         self.assertNotIn("Long Campaign", text)
 

@@ -121,6 +121,8 @@ class TUIState:
     campaigns: dict[str, CampaignSnapshot] = field(default_factory=dict)
     websockets: dict[int, WebsocketSnapshot] = field(default_factory=dict)
     logs: list[str] = field(default_factory=list)
+    splash_shown: bool = False
+    spinner_tick: int = 0
 
     def add_log(self, message: str) -> None:
         self.logs.append(message)

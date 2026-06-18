@@ -86,35 +86,47 @@ The portable CLI has a boxed command input with slash-command autocomplete.
 
 Type `/` to list commands. Type `/priority add `, `/exclude add `, or `/switch ` to autocomplete available games and channels.
 
-Common commands:
+Type `/help` in the CLI to view all commands grouped by category with descriptions.
 
-```text
-/dashboard
-/channels
-/channels next
-/channels prev
-/drops
-/drops next
-/drops prev
-/settings
-/logs
-/reload
-/switch <channel>
-/priority add <game>
-/priority remove <game>
-/exclude add <game>
-/exclude remove <game>
-/mode priority-only
-/mode ending-soonest
-/mode low-availability
-/farm-unlinked on
-/farm-unlinked off
-/filter expired on
-/filter expired off
-/filter finished on
-/filter finished off
-/quit
-```
+### Navigation
+
+| Command | Description |
+|---------|-------------|
+| `/dashboard` | Switch to the dashboard view (default) |
+| `/channels` | Switch to the channels list view |
+| `/channels next` | Page forward in the channels list |
+| `/channels prev` | Page backward in the channels list |
+| `/drops` | Switch to the drops/campaigns view |
+| `/drops next` | Page forward in the drops list |
+| `/drops prev` | Page backward in the drops list |
+| `/settings` | Switch to the settings view |
+| `/logs` | Switch to the logs view |
+| `/help` | Show the help page (use `/help <topic>` for details) |
+
+### Control
+
+| Command | Description |
+|---------|-------------|
+| `/reload` | Reload inventory and campaign data from Twitch |
+| `/switch <channel>` | Switch to a specific channel by name or ID |
+| `/priority add <game>` | Add a game to the priority list |
+| `/priority remove <game>` | Remove a game from the priority list |
+| `/priority bump <game>` | Move a game up in the priority list |
+| `/priority demote <game>` | Move a game down in the priority list |
+| `/exclude add <game>` | Add a game to the exclude list |
+| `/exclude remove <game>` | Remove a game from the exclude list |
+| `/mode <mode>` | Set priority mode: `priority-only`, `ending-soonest`, `low-availability` |
+| `/filter <name> <on\|off>` | Toggle filters: `not-linked`, `upcoming`, `expired`, `excluded`, `finished` |
+| `/farm-unlinked on\|off` | Enable/disable farming unlinked drops (priority-only mode) |
+
+### System
+
+| Command | Description |
+|---------|-------------|
+| `/open` | Open the Twitch login URL in a browser (when login is pending) |
+| `/copy` | Show the Twitch login URL (when login is pending) |
+| `/detach` | Detach from current tmux session (keeps miner running) |
+| `/quit` | Exit the application |
 
 ## TUI Shortcuts
 
@@ -165,6 +177,7 @@ python tdminer.py cli
 - `tdminer` release binaries are built with PyInstaller.
 - Linux release binaries require compatible glibc Linux systems.
 - Termux uses source install instead of release binaries.
+- For full build and deployment instructions across all platforms, see [DEPLOY.md](DEPLOY.md).
 
 ## Credits
 
