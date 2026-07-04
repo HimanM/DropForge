@@ -380,7 +380,7 @@ jobs:
         run: |
           python3 -m pip install --user --upgrade setuptools wheel
           # TODO: Switch to a stable release if/when a version newer than 1.1.0 is released.
-          python3 -m pip install git+https://github.com/AppImageCrafters/appimage-builder.git@e995e8edcc227d14524cf39f9824c238f9435a22
+          python3 -m pip install --use-pep517 git+https://github.com/AppImageCrafters/appimage-builder.git@e995e8edcc227d14524cf39f9824c238f9435a22
 
       - name: Create AppImage
         env:
