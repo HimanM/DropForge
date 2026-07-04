@@ -28,3 +28,4 @@ settings.json
 *.app
 /.venv-linux-build
 /.venv-tui
+/graphify-out
