@@ -32,5 +32,6 @@ settings.json
 
 # Android local SDK/build state
 /android/.gradle
+/android/.kotlin
 /android/local.properties
 /android/app/build
