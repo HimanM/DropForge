@@ -154,7 +154,6 @@ class TwitchDropsTUI(App[None]):
         *,
         on_close: abc.Callable[[], None],
         on_reload: abc.Callable[[], None],
-        on_invalidate_auth: abc.Callable[[], None],
         login_confirm: asyncio_event_setter,
         on_switch: abc.Callable[[], None],
         on_save_settings: abc.Callable[[str, str], None],
@@ -166,6 +165,7 @@ class TwitchDropsTUI(App[None]):
         on_set_priority_mode: abc.Callable[[str], None],
         on_set_farm_unlinked: abc.Callable[[bool], None],
         on_set_badges_emotes: abc.Callable[[bool], None],
+        on_invalidate_auth: abc.Callable[[], None] = lambda: None,
         on_ready: abc.Callable[[], None] | None = None,
     ) -> None:
         super().__init__()
