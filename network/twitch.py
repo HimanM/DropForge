@@ -416,8 +416,18 @@ class _AuthState:
             jar.save(COOKIES_PATH)
         self._logged_in.set()
 
-    def invalidate(self):
-        self._delattrs("access_token")
+    def invalidate(self, *, delete_cookies: bool = False) -> None:
+        self._delattrs("access_token", "user_id")
+        session = self._twitch._session
+        if session is None:
+            return
+        cookie_jar = cast(aiohttp.CookieJar, session.cookie_jar)
+        client_info: ClientInfo = self._twitch._client_type
+        for cookies in cookie_jar._cookies.values():
+            cookies.pop("auth-token", None)
+        if delete_cookies:
+            cookie_jar.clear_domain(client_info.CLIENT_URL.host)
+            COOKIES_PATH.unlink(missing_ok=True)
 
 
 class Twitch:
@@ -886,6 +896,8 @@ class Twitch:
                 self.gui.status.update(_("gui", "status", "exiting"))
                 # we've been requested to exit the application
                 break
+            elif self._state is State.RESTART:
+                raise ReloadRequest()
             await self._state_change.wait()
 
     async def _watch_sleep(self, delay: float) -> None:

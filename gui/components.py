@@ -1864,6 +1864,14 @@ class SettingsPanel:
             text=_("gui", "settings", "reload"),
             command=self._manager._twitch.state_change(State.INVENTORY_FETCH),
         ).grid(column=1, row=0)
+        ttk.Button(
+            reload_frame,
+            text="Invalidate auth",
+            command=lambda: (
+                self._manager._twitch.invalidate(),
+                self._manager._twitch.state_change(State.RESTART),
+            ),
+        ).grid(column=2, row=0, padx=(4, 0))
 
         self._vars["autostart"].set(self._query_autostart())
         self.priority_mode()

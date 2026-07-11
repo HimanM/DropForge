@@ -406,6 +406,7 @@ class TUIManager:
             self.state,
             on_close=self.close,
             on_reload=self._reload,
+            on_invalidate_auth=self._invalidate_auth,
             login_confirm=self.login.confirm,
             on_switch=self._switch_channel,
             on_save_settings=self._save_settings,
@@ -528,6 +529,10 @@ class TUIManager:
 
     def _reload(self) -> None:
         self._twitch.change_state(State.INVENTORY_FETCH)
+
+    def _invalidate_auth(self) -> None:
+        self._twitch.invalidate()
+        self._twitch.change_state(State.RESTART)
 
     def _switch_channel(self) -> None:
         if self.selected_channel_id() is not None:

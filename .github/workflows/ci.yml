@@ -127,6 +127,36 @@ jobs:
           name: Twitch.Drops.Miner.Windows
           path: Twitch.Drops.Miner.Windows.zip
 
+  android:
+    name: Android
+    runs-on: ubuntu-latest
+    needs:
+      - validate
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Build and test Android app
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew testDebugUnitTest assembleDebug --no-daemon
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          if-no-files-found: error
+          name: Twitch.Drops.Miner.Android
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+
   macos:
     name: macOS
     runs-on: macos-latest
@@ -409,6 +439,7 @@ jobs:
     name: Upload builds to Releases
     if: github.event_name != 'pull_request'
     needs:
+      - android
       - windows
       - linux-pyinstaller
       - linux-appimage

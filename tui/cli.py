@@ -140,6 +140,7 @@ class PortableCLIManager(TUIManager):
         "/settings",
         "/logs",
         "/reload",
+        "/invalidate",
         "/open",
         "/copy",
         "/switch",
@@ -366,6 +367,8 @@ class PortableCLIManager(TUIManager):
         elif command == "reload":
             self._loading = True
             self._reload()
+        elif command == "invalidate":
+            self._invalidate_auth()
         elif command == "open":
             self._open_login_url()
         elif command == "copy":
@@ -523,6 +526,7 @@ class PortableCLIManager(TUIManager):
         ],
         "control": [
             ("/reload", "Reload inventory and campaign data from Twitch"),
+            ("/invalidate", "Invalidate the saved auth token and restart login"),
             ("/switch <channel>", "Switch to a specific channel by name or ID"),
             ("/priority add <game>", "Add a game to the priority list"),
             ("/priority remove <game>", "Remove a game from the priority list"),

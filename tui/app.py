@@ -140,6 +140,7 @@ class TwitchDropsTUI(App[None]):
         ("ctrl+q", "request_quit", "Quit"),
         ("ctrl+c", "request_quit", "Quit"),
         ("r", "reload", "Reload"),
+        ("i", "invalidate_auth", "Invalidate Auth"),
         ("s", "switch_channel", "Switch"),
         ("b", "open_browser", "Open Browser"),
         ("c", "copy_login_url", "Copy Login URL"),
@@ -153,6 +154,7 @@ class TwitchDropsTUI(App[None]):
         *,
         on_close: abc.Callable[[], None],
         on_reload: abc.Callable[[], None],
+        on_invalidate_auth: abc.Callable[[], None],
         login_confirm: asyncio_event_setter,
         on_switch: abc.Callable[[], None],
         on_save_settings: abc.Callable[[str, str], None],
@@ -170,6 +172,7 @@ class TwitchDropsTUI(App[None]):
         self.state = state
         self._on_close = on_close
         self._on_reload = on_reload
+        self._on_invalidate_auth = on_invalidate_auth
         self._login_confirm = login_confirm
         self._on_switch = on_switch
         self._on_save_settings = on_save_settings
@@ -248,6 +251,7 @@ class TwitchDropsTUI(App[None]):
                                 yield Button("+ priority", id="add-priority", compact=True, flat=True)
                                 yield Button("+ exclude", id="add-exclude", compact=True, flat=True)
                             yield Button("reload", id="reload", compact=True, flat=True)
+                            yield Button("invalidate", id="invalidate-auth", compact=True, flat=True)
                         with Vertical(classes="compact-panel grow"):
                             yield Label("Priority")
                             yield DataTable(id="priority-table")
@@ -509,6 +513,9 @@ class TwitchDropsTUI(App[None]):
     def action_reload(self) -> None:
         self._on_reload()
 
+    def action_invalidate_auth(self) -> None:
+        self._on_invalidate_auth()
+
     def action_switch_channel(self) -> None:
         self._on_switch()
 
@@ -548,6 +555,8 @@ class TwitchDropsTUI(App[None]):
             self.copy_activation_url()
         elif button_id == "reload":
             self._on_reload()
+        elif button_id == "invalidate-auth":
+            self._on_invalidate_auth()
         elif button_id == "add-priority":
             self.action_add_priority()
         elif button_id == "add-exclude":
