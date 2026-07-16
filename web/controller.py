@@ -123,6 +123,9 @@ class MinerController:
             "selected_channel_id": None,
             "logs": [],
         }
+        if not self.running:
+            state["login"]["activation_url"] = ""
+            state["login"]["user_code"] = ""
         return {
             **state,
             "miner": {

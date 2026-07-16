@@ -334,6 +334,8 @@ def create_app(auth_path: Path, static_path: Path, *, auto_start: bool = True) -
     @web.middleware
     async def security_headers(request: web.Request, handler: Any) -> web.StreamResponse:
         response = await handler(request)
+        if request.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; "
             "script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; "

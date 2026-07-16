@@ -143,7 +143,12 @@ export function Dashboard({ session, onSignedOut }: Props) {
   useEffect(() => {
     load()
     const timer = window.setInterval(() => load(true), 2500)
-    return () => window.clearInterval(timer)
+    const refresh = () => load(true)
+    window.addEventListener("focus", refresh)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener("focus", refresh)
+    }
   }, [load])
 
   useEffect(() => {
@@ -182,7 +187,7 @@ export function Dashboard({ session, onSignedOut }: Props) {
   ]
 
   return (
-    <main className="min-h-[100dvh] bg-background text-foreground">
+    <main className="flex min-h-[100dvh] flex-col bg-background text-foreground">
       <header className="sticky top-0 z-40 border-b border-border/80 bg-background/92 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-[1500px] items-center gap-3 px-4 sm:px-6">
           <img className="size-9 rounded-xl ring-1 ring-border" src="/favicon-v2.png" alt="DropForge icon" />
@@ -200,7 +205,7 @@ export function Dashboard({ session, onSignedOut }: Props) {
         </div>
       </header>
 
-      <Tabs value={tab} onValueChange={(value) => setTab(value as Tab)} className="mx-auto max-w-[1500px] flex-col px-4 pb-10 sm:px-6">
+      <Tabs value={tab} onValueChange={(value) => setTab(value as Tab)} className="mx-auto w-full max-w-[1500px] flex-1 flex-col px-4 pb-10 sm:px-6">
         <div className="sticky top-16 z-30 -mx-4 overflow-x-auto border-b border-border/70 bg-background/92 px-4 backdrop-blur-xl sm:-mx-6 sm:px-6">
           <TabsList className="h-12 w-max gap-2 bg-transparent p-0" variant="line">
             {nav.map((item) => <TabsTrigger key={item.value} value={item.value} className="h-11 gap-2 px-3" aria-label={item.label}>{item.icon}<span className="hidden sm:inline">{item.label}</span></TabsTrigger>)}
