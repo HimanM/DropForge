@@ -245,13 +245,35 @@ EOF
     exit 0
   fi
 
+  server_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  [ -n "$server_ip" ] || server_ip="SERVER_IP"
+  if [ "$HOST" = "127.0.0.1" ]; then
+    access_url="http://127.0.0.1:$PORT"
+  else
+    access_url="http://$server_ip:$PORT"
+  fi
+
   if [ ! -f "$DATA_DIR/web-auth.sqlite3" ]; then
     admin_password="${TDMINER_ADMIN_PASSWORD:-$(python3 -c 'import secrets; print(secrets.token_urlsafe(18))')}"
     recovery_code="${TDMINER_RECOVERY_CODE:-$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')}"
     TDMINER_DATA_DIR="$DATA_DIR" \
       TDMINER_ADMIN_PASSWORD="$admin_password" \
       TDMINER_RECOVERY_CODE="$recovery_code" \
-      "$release_dir/venv/bin/python" "$release_dir/tdminer_web.py" provision
+      "$release_dir/venv/bin/python" "$release_dir/tdminer_web.py" provision >/dev/null
+    echo ""
+    echo "============================================================"
+    echo "  DropForge Web Access"
+    echo "============================================================"
+    printf '  Access URL      %s\n' "$access_url"
+    printf '  Server IP       %s\n' "$server_ip"
+    printf '  Bind address    %s\n' "$HOST"
+    printf '  Port            %s\n' "$PORT"
+    echo "------------------------------------------------------------"
+    echo "  SAVE THESE CREDENTIALS"
+    printf '  Admin password  %s\n' "$admin_password"
+    printf '  Recovery code   %s\n' "$recovery_code"
+    echo "============================================================"
+    echo "The recovery code is rotated after every password reset."
   else
     echo "Existing web password, sessions, Twitch cookies, and settings preserved."
   fi
@@ -284,7 +306,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=$DATA_DIR
+ReadWritePaths=$DATA_DIR $APP_DIR/current/lang
 
 [Install]
 WantedBy=multi-user.target
@@ -308,9 +330,10 @@ EOF
       mv -Tf "$APP_DIR/current.rollback" "$APP_DIR/current"
       as_root systemctl restart "$SERVICE_NAME.service" || true
     else
+      as_root systemctl stop "$SERVICE_NAME.service" || true
       rm -f "$APP_DIR/current"
     fi
-    echo "DropForge failed to start; the previous release was restored." >&2
+    echo "DropForge failed to start. Run: sudo journalctl -u $SERVICE_NAME.service -n 100 --no-pager" >&2
     exit 1
   fi
 
@@ -349,15 +372,13 @@ EOF
     as_root ufw allow "$PORT/tcp" comment DropForge
   fi
 
-  server_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
-  [ -n "$server_ip" ] || server_ip="SERVER_IP"
   echo ""
   echo "DropForge is installed and running."
   if [ "$HOST" = "127.0.0.1" ]; then
-    echo "Open locally: http://127.0.0.1:$PORT"
+    echo "Open locally: $access_url"
     echo "Recommended private remote access: tailscale serve --bg http://127.0.0.1:$PORT"
   else
-    echo "Open: http://$server_ip:$PORT"
+    echo "Open: $access_url"
     echo "Warning: 0.0.0.0 exposes DropForge to every reachable network interface."
   fi
   echo "Persistent data: $DATA_DIR"
