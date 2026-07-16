@@ -81,6 +81,29 @@
   ::selection { background: color-mix(in oklab, var(--primary) 30%, transparent); }
 }
 
+.scrollbar-theme {
+  scrollbar-color: color-mix(in oklab, var(--primary) 78%, transparent) transparent;
+  scrollbar-width: thin;
+}
+
+.scrollbar-theme::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.scrollbar-theme::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-theme::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--primary) 78%, transparent);
+}
+
+.scrollbar-theme::-webkit-scrollbar-thumb:hover {
+  background: var(--primary);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     scroll-behavior: auto !important;
