@@ -62,6 +62,53 @@ jobs:
         run: |
           python3 -m compileall -q tui tdminer.py network/twitch.py core/utils.py
 
+  web:
+    name: Linux Web UI
+    runs-on: ubuntu-latest
+    needs:
+      - validate
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{env.PYTHON_VERSION}}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+
+      - name: Install web dependencies
+        run: |
+          python3 -m pip install -r requirements-web.txt
+          npm ci --prefix web/frontend
+
+      - name: Build web frontend
+        run: |
+          npm run build --prefix web/frontend
+          git diff --exit-code -- web/static
+
+      - name: Test web server and installer
+        run: |
+          python3 -m unittest discover -s tests -p "test_web*.py" -v
+          python3 -m unittest discover -s tests -p "test_installer.py" -v
+          python3 -m compileall -q web tdminer_web.py tui/manager.py
+          bash -n scripts/install.sh
+
+      - name: Upload install scripts
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          if-no-files-found: error
+          name: Twitch.Drops.Miner.Install.Scripts
+          path: scripts/install.sh
+
   windows:
     name: Windows
     runs-on: windows-latest
@@ -410,6 +457,7 @@ jobs:
     if: github.event_name != 'pull_request'
     needs:
       - windows
+      - web
       - linux-pyinstaller
       - linux-appimage
       - linux-tui
@@ -447,13 +495,17 @@ jobs:
             - Build date: `${{steps.vars.outputs.date_now}}`
             - Reference commit: ${{github.sha}}
 
-            **Terminal UI install**
+            **Linux server or CLI install**
 
-            Linux/macOS:
+            Linux:
 
             ```sh
             curl -fsSL https://raw.githubusercontent.com/HimanM/TwitchDropsMiner/main/scripts/install.sh | sh
             ```
+
+            Choose the authenticated DropForge Web UI or terminal CLI when prompted. Web installs default to localhost on port `17473`; use Tailscale Serve for private remote access or explicitly select `0.0.0.0` for a trusted LAN.
+
+            macOS uses the same command and installs the terminal release.
 
             On Termux, install prerequisites first:
 
@@ -461,11 +513,11 @@ jobs:
             pkg install python clang curl tar
             ```
 
-            Run `tdminer tui` for the richer Linux/macOS Textual interface, or `tdminer cli` for the portable prompt-based interface used by Windows/source installs and Termux-style terminals.
+            Run `tdminer tui` for the richer macOS Textual interface, or `tdminer cli` for the portable prompt-based interface used by source installs and Termux-style terminals.
 
             The portable CLI includes a boxed slash-command input. Type `/` for commands, `/priority add ` or `/exclude add ` for game completion, and `/switch ` for channel completion.
 
-            The `tdminer` release binaries are self-contained and do not require Linux/macOS users to install Python first. The binary installer needs `curl` and `unzip`, installs to `~/.local/bin` by default, and can be redirected with `TDMINER_INSTALL_DIR=/path/to/bin`.
+            The Linux installer manages source releases, dependencies, systemd, and persistent data under `~/.local/share/tdminer`. The macOS release binary is self-contained. Launchers install to `~/.local/bin` by default and can be redirected with `TDMINER_INSTALL_DIR=/path/to/bin`.
 
           name: "Release v${{steps.vars.outputs.app_version}}"
           prerelease: false

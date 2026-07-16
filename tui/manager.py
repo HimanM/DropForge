@@ -11,7 +11,6 @@ from yarl import URL
 from core.constants import PriorityMode, State
 from core.exceptions import ExitRequest
 from core.translate import _
-from tui.app import TwitchDropsTUI
 from tui.state import (
     CampaignSnapshot,
     ChannelSnapshot,
@@ -28,6 +27,7 @@ if TYPE_CHECKING:
     from models.channel import Channel
     from models.inventory import DropsCampaign, TimedDrop
     from network.twitch import Twitch
+    from tui.app import TwitchDropsTUI
 
 
 logger = logging.getLogger("TwitchDrops")
@@ -401,6 +401,8 @@ class TUIManager:
     def start(self) -> None:
         if self._app_task is not None and not self._app_task.done():
             return
+        from tui.app import TwitchDropsTUI
+
         self._app_ready.clear()
         self._app = TwitchDropsTUI(
             self.state,

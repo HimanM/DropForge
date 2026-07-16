@@ -7,6 +7,7 @@ The miner advances Twitch drop progress without playing video. It logs in to Twi
 ## Features
 
 - GUI build for normal desktop use.
+- DropForge Web UI for authenticated, image-rich Linux server control from desktop or mobile browsers.
 - Terminal UI through `tdminer`.
 - Portable CLI mode for headless Linux, SSH sessions, Termux source installs, and terminals where full TUIs are awkward.
 - Twitch device-code login for terminal sessions.
@@ -15,7 +16,7 @@ The miner advances Twitch drop progress without playing video. It logs in to Twi
 - Game priority and exclusion lists.
 - Automatic channel selection and manual channel switching.
 - Optional unlinked-drop farming for the Twitch linked-account display bug.
-- Linux/macOS release installer and Termux source installer.
+- One-command Linux Web UI or CLI installer with in-place updates and persistent data.
 
 ## Desktop Install
 
@@ -27,20 +28,52 @@ Unzip it, run the app, log in, then use the Settings tab to configure priority/e
 
 Persistent files such as `cookies.jar`, `settings.json`, `lock.file`, `cache/`, and logs live next to the executable or inside the app bundle, depending on the platform.
 
-## Terminal Install
+## Linux Server Install
 
-Linux/macOS:
+Run the installer and choose the Web UI or CLI when prompted:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/HimanM/TwitchDropsMiner/main/scripts/install.sh | sh
 ```
 
-The installer downloads the latest matching `tdminer` release asset and installs it to `~/.local/bin` by default.
+The first Web UI install prints a generated admin password and recovery code, then asks whether to bind to localhost or `0.0.0.0`. Localhost is recommended and selected by default. Re-running the same command updates the selected interface while preserving the bind choice, Twitch cookie jar, settings, admin credentials, recovery data, and browser sessions under `~/.local/share/tdminer/data`.
+
+For private remote access while keeping the app on localhost, install Tailscale and run:
+
+```sh
+tailscale serve --bg http://127.0.0.1:17473
+```
+
+To expose the port directly on every network interface instead:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/HimanM/TwitchDropsMiner/main/scripts/install.sh | TDMINER_HOST=0.0.0.0 sh
+```
+
+The installer remembers the selected interface. For unattended installs or to switch later:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/HimanM/TwitchDropsMiner/main/scripts/install.sh | TDMINER_MODE=web sh
+curl -fsSL https://raw.githubusercontent.com/HimanM/TwitchDropsMiner/main/scripts/install.sh | TDMINER_MODE=cli sh
+```
+
+Web service commands:
+
+```sh
+tdminer-web status
+tdminer-web restart
+tdminer-web logs
+tdminer-web reset-password
+```
+
+Passwords and recovery codes are salted and hashed with scrypt. Session cookies are opaque, HttpOnly, and cleared on website logout. Website logout does not stop mining or clear the Twitch cookie jar. Binding to `0.0.0.0` uses HTTP, so use it only on a trusted network; localhost plus Tailscale Serve is recommended for private HTTPS remote access.
+
+macOS terminal install uses the same command and installs the latest release asset.
 
 Custom install location:
 
 ```sh
-TDMINER_INSTALL_DIR="$HOME/bin" curl -fsSL https://raw.githubusercontent.com/HimanM/TwitchDropsMiner/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/HimanM/TwitchDropsMiner/main/scripts/install.sh | TDMINER_INSTALL_DIR="$HOME/bin" sh
 ```
 
 Termux:
