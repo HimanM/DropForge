@@ -68,6 +68,16 @@ export type Settings = {
   connection_quality: number
 }
 
+export type NotificationSettings = {
+  enabled: boolean
+  configured: boolean
+  webhook_label: string
+  notify_claimed: boolean
+  notify_new_drops: boolean
+  notify_status: boolean
+  notify_operational: boolean
+}
+
 export type MinerState = {
   status: string
   icon_state: string
@@ -89,6 +99,7 @@ export type MinerState = {
   campaigns: Campaign[]
   websockets: { index: number; status: string; topics: number }[]
   settings: Partial<Settings>
+  notifications: Partial<NotificationSettings>
   selected_channel_id: string | null
   logs: string[]
 }

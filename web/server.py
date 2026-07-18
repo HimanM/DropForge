@@ -14,6 +14,7 @@ from yarl import URL
 from version import __version__
 from web.auth import AuthStore, PASSWORD_MIN_LENGTH, SESSION_TTL, Session
 from web.controller import MinerController
+from web.discord import DiscordNotifier
 
 
 SESSION_COOKIE = "tdminer_session"
@@ -96,7 +97,8 @@ def _validate_game_list(value: Any, name: str) -> list[str]:
 def create_app(auth_path: Path, static_path: Path, *, auto_start: bool = True) -> web.Application:
     app = web.Application(client_max_size=64 * 1024)
     app["auth"] = AuthStore(auth_path)
-    app["controller"] = MinerController()
+    app["notifier"] = DiscordNotifier(app["auth"])
+    app["controller"] = MinerController(app["notifier"])
     app["limiter"] = LoginLimiter()
     app["static_path"] = static_path.resolve()
 
@@ -106,6 +108,7 @@ def create_app(auth_path: Path, static_path: Path, *, auto_start: bool = True) -
 
     async def on_cleanup(application: web.Application) -> None:
         await application["controller"].close()
+        await application["notifier"].close()
 
     app.on_startup.append(on_startup)
     app.on_cleanup.append(on_cleanup)
@@ -304,6 +307,28 @@ def create_app(auth_path: Path, static_path: Path, *, auto_start: bool = True) -
             return _json_error(str(exc), 400)
         return web.json_response({"ok": True, "settings": manager.snapshot()["settings"]})
 
+    async def update_notifications(request: web.Request) -> web.Response:
+        session = await _session(request, csrf=True)
+        if isinstance(session, web.Response):
+            return session
+        try:
+            settings = request.app["notifier"].update(await _body(request))
+        except ValueError as exc:
+            return _json_error(str(exc), 400)
+        return web.json_response({"ok": True, "notifications": settings})
+
+    async def test_notifications(request: web.Request) -> web.Response:
+        session = await _session(request, csrf=True)
+        if isinstance(session, web.Response):
+            return session
+        try:
+            await request.app["notifier"].test()
+        except ValueError as exc:
+            return _json_error(str(exc), 400)
+        except Exception as exc:
+            return _json_error(f"Discord test failed: {exc}", 502)
+        return web.json_response({"ok": True})
+
     async def frontend(request: web.Request) -> web.StreamResponse:
         static_root: Path = request.app["static_path"]
         tail = request.match_info.get("tail", "")
@@ -329,6 +354,8 @@ def create_app(auth_path: Path, static_path: Path, *, auto_start: bool = True) -
     app.router.add_post("/api/miner/{action}", miner_action)
     app.router.add_post("/api/channels/select", select_channel)
     app.router.add_put("/api/settings", update_settings)
+    app.router.add_put("/api/notifications", update_notifications)
+    app.router.add_post("/api/notifications/test", test_notifications)
     app.router.add_get("/{tail:.*}", frontend)
 
     @web.middleware

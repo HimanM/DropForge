@@ -113,6 +113,14 @@ class AuthStore:
                     csrf_token TEXT NOT NULL,
                     expires_at INTEGER NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS settings (
+                    name TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS notification_events (
+                    event_key TEXT PRIMARY KEY,
+                    notified_at INTEGER NOT NULL
+                );
                 """
             )
         if os.name != "nt":
@@ -224,3 +232,36 @@ class AuthStore:
             )
             db.execute("DELETE FROM sessions")
         return next_recovery
+
+    def get_settings(self, defaults: dict[str, str]) -> dict[str, str]:
+        with self._db() as db:
+            rows = db.execute("SELECT name, value FROM settings").fetchall()
+        return {**defaults, **dict(rows)}
+
+    def update_settings(self, values: dict[str, str | None]) -> None:
+        with self._db() as db:
+            for name, value in values.items():
+                if value is None:
+                    db.execute("DELETE FROM settings WHERE name = ?", (name,))
+                else:
+                    db.execute(
+                        "INSERT INTO settings(name, value) VALUES (?, ?) "
+                        "ON CONFLICT(name) DO UPDATE SET value = excluded.value",
+                        (name, value),
+                    )
+
+    def claim_notification_event(self, event_key: str, cooldown: int | None = None) -> bool:
+        now = int(time.time())
+        with self._db() as db:
+            row = db.execute(
+                "SELECT notified_at FROM notification_events WHERE event_key = ?",
+                (event_key,),
+            ).fetchone()
+            if row is not None and (cooldown is None or row[0] > now - cooldown):
+                return False
+            db.execute(
+                "INSERT INTO notification_events(event_key, notified_at) VALUES (?, ?) "
+                "ON CONFLICT(event_key) DO UPDATE SET notified_at = excluded.notified_at",
+                (event_key, now),
+            )
+        return True
