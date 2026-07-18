@@ -6,6 +6,7 @@ import {
   CaretUpIcon,
   CheckCircleIcon,
   ClockIcon,
+  DiscordLogoIcon,
   FloppyDiskIcon,
   GameControllerIcon,
   GearIcon,
@@ -18,6 +19,7 @@ import {
   ListChecksIcon,
   MagnifyingGlassIcon,
   MoonIcon,
+  PaperPlaneTiltIcon,
   PlayIcon,
   PlusIcon,
   PowerIcon,
@@ -50,7 +52,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
-import type { Campaign, MinerState, SessionMeta, Settings } from "@/types"
+import type { Campaign, MinerState, NotificationSettings, SessionMeta, Settings } from "@/types"
 
 type Props = {
   session: SessionMeta
@@ -60,6 +62,8 @@ type Props = {
 type Tab = "overview" | "campaigns" | "channels" | "games" | "settings" | "logs"
 
 type SettingsChange = <K extends keyof Settings>(key: K, value: Settings[K]) => void
+type NotificationDraft = Pick<NotificationSettings, "enabled" | "notify_claimed" | "notify_new_drops" | "notify_status" | "notify_operational"> & { webhook_url: string }
+type NotificationChange = <K extends keyof NotificationDraft>(key: K, value: NotificationDraft[K]) => void
 
 const PRIORITY_ONLY = "Priority list only"
 
@@ -73,6 +77,7 @@ const EMPTY_STATE: MinerState = {
   campaigns: [],
   websockets: [],
   settings: {},
+  notifications: {},
   selected_channel_id: null,
   logs: [],
 }
@@ -101,7 +106,7 @@ function percent(value = 0) {
 
 function Metric({ label, value, icon }: { label: string; value: string | number; icon: ReactNode }) {
   return (
-    <div className="min-w-0 border-l border-border pl-4 first:border-l-0 first:pl-0">
+    <div className="min-w-0 border-l border-border pl-4">
       <div className="mb-1 flex items-center gap-1.5 text-muted-foreground">{icon}<span className="text-xs">{label}</span></div>
       <p className="truncate text-xl font-semibold tracking-tight tabular-nums">{value}</p>
     </div>
@@ -117,6 +122,9 @@ export function Dashboard({ session, onSignedOut }: Props) {
   const [error, setError] = useState("")
   const [settingsDraft, setSettingsDraft] = useState<Partial<Settings>>({})
   const [settingsDirty, setSettingsDirty] = useState(false)
+  const [notificationDraft, setNotificationDraft] = useState<NotificationDraft>({ enabled: false, notify_claimed: true, notify_new_drops: true, notify_status: true, notify_operational: false, webhook_url: "" })
+  const [notificationDirty, setNotificationDirty] = useState(false)
+  const [notificationMessage, setNotificationMessage] = useState("")
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     const saved = localStorage.getItem("dropforge-theme")
     return saved === "light" || saved === "dark"
@@ -168,6 +176,17 @@ export function Dashboard({ session, onSignedOut }: Props) {
     if (!settingsDirty) setSettingsDraft(state.settings.priority_mode === PRIORITY_ONLY ? state.settings : { ...state.settings, farm_unlinked: false })
   }, [settingsDirty, state.settings])
 
+  useEffect(() => {
+    if (!notificationDirty) setNotificationDraft({
+      enabled: Boolean(state.notifications.enabled),
+      notify_claimed: state.notifications.notify_claimed ?? true,
+      notify_new_drops: state.notifications.notify_new_drops ?? true,
+      notify_status: state.notifications.notify_status ?? true,
+      notify_operational: Boolean(state.notifications.notify_operational),
+      webhook_url: "",
+    })
+  }, [notificationDirty, state.notifications])
+
   async function runAction(name: string, path: string, options: RequestInit = { method: "POST" }) {
     setBusy(name)
     setError("")
@@ -202,6 +221,57 @@ export function Dashboard({ session, onSignedOut }: Props) {
       await load(true)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Settings could not be saved.")
+    } finally {
+      setBusy("")
+    }
+  }
+
+  function changeNotification<K extends keyof NotificationDraft>(key: K, value: NotificationDraft[K]) {
+    setNotificationDraft((current) => ({ ...current, [key]: value }))
+    setNotificationDirty(true)
+    setNotificationMessage("")
+  }
+
+  async function saveNotifications() {
+    setBusy("notifications")
+    setError("")
+    try {
+      const payload: Partial<NotificationDraft> = { ...notificationDraft }
+      if (!payload.webhook_url?.trim()) delete payload.webhook_url
+      await api("/api/notifications", { method: "PUT", body: JSON.stringify(payload) })
+      setNotificationDirty(false)
+      setNotificationMessage("Discord settings saved.")
+      await load(true)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Discord settings could not be saved.")
+    } finally {
+      setBusy("")
+    }
+  }
+
+  async function testNotifications() {
+    setBusy("notifications-test")
+    setError("")
+    try {
+      await api("/api/notifications/test", { method: "POST" })
+      setNotificationMessage("Test message sent to Discord.")
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Discord test failed.")
+    } finally {
+      setBusy("")
+    }
+  }
+
+  async function removeNotifications() {
+    setBusy("notifications-remove")
+    setError("")
+    try {
+      await api("/api/notifications", { method: "PUT", body: JSON.stringify({ webhook_url: "" }) })
+      setNotificationDirty(false)
+      setNotificationMessage("Discord webhook removed.")
+      await load(true)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Discord webhook could not be removed.")
     } finally {
       setBusy("")
     }
@@ -318,7 +388,7 @@ export function Dashboard({ session, onSignedOut }: Props) {
         <TabsContent value="campaigns" className="min-h-0 overflow-hidden pt-5"><Campaigns campaigns={state.campaigns} /></TabsContent>
         <TabsContent value="channels" className="min-h-0 overflow-hidden pt-5"><Channels state={state} busy={busy} onSelect={(id) => runAction("channel", "/api/channels/select", { method: "POST", body: JSON.stringify({ channel_id: id }) })} /></TabsContent>
         <TabsContent value="games" className="min-h-0 overflow-hidden pt-5"><GameRules draft={settingsDraft} dirty={settingsDirty} busy={busy} onChange={changeSetting} onSave={saveSettings} /></TabsContent>
-        <TabsContent value="settings" className="min-h-0 overflow-hidden pt-5"><SettingsPanel draft={settingsDraft} dirty={settingsDirty} busy={busy} session={session} onSignedOut={onSignedOut} onChange={changeSetting} onSave={saveSettings} onInvalidate={() => runAction("invalidate", "/api/miner/invalidate-auth")} /></TabsContent>
+        <TabsContent value="settings" className="min-h-0 overflow-hidden pt-5"><SettingsPanel draft={settingsDraft} dirty={settingsDirty} busy={busy} session={session} notifications={state.notifications} notificationDraft={notificationDraft} notificationDirty={notificationDirty} notificationMessage={notificationMessage} onSignedOut={onSignedOut} onChange={changeSetting} onNotificationChange={changeNotification} onSave={saveSettings} onSaveNotifications={saveNotifications} onTestNotifications={testNotifications} onRemoveNotifications={removeNotifications} onInvalidate={() => runAction("invalidate", "/api/miner/invalidate-auth")} /></TabsContent>
         <TabsContent value="logs" className="min-h-0 overflow-hidden pt-5"><Logs logs={state.logs} /></TabsContent>
       </Tabs>
 
@@ -422,7 +492,7 @@ function SaveActions({ dirty, busy, onSave }: { dirty: boolean; busy: string; on
   return <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={!dirty || saving} onClick={() => onSave(false)}><FloppyDiskIcon />{busy === "settings" ? "Saving" : "Save"}</Button><Button disabled={saving} onClick={() => onSave(true)}><ArrowsClockwiseIcon />{busy === "settings-reload" ? "Saving and reloading" : "Save and reload"}</Button></div>
 }
 
-function SettingsPanel({ draft, dirty, busy, session, onChange, onSave, onInvalidate, onSignedOut }: { draft: Partial<Settings>; dirty: boolean; busy: string; session: SessionMeta; onChange: SettingsChange; onSave: (reload: boolean) => void; onInvalidate: () => void; onSignedOut: () => void }) {
+function SettingsPanel({ draft, dirty, busy, session, notifications, notificationDraft, notificationDirty, notificationMessage, onChange, onNotificationChange, onSave, onSaveNotifications, onTestNotifications, onRemoveNotifications, onInvalidate, onSignedOut }: { draft: Partial<Settings>; dirty: boolean; busy: string; session: SessionMeta; notifications: Partial<NotificationSettings>; notificationDraft: NotificationDraft; notificationDirty: boolean; notificationMessage: string; onChange: SettingsChange; onNotificationChange: NotificationChange; onSave: (reload: boolean) => void; onSaveNotifications: () => void; onTestNotifications: () => void; onRemoveNotifications: () => void; onInvalidate: () => void; onSignedOut: () => void }) {
   const priorityOnly = draft.priority_mode === PRIORITY_ONLY
   const setPriorityMode = (value: string) => { onChange("priority_mode", value); if (value !== PRIORITY_ONLY) onChange("farm_unlinked", false) }
 
@@ -438,6 +508,23 @@ function SettingsPanel({ draft, dirty, busy, session, onChange, onSave, onInvali
         <Field label="Proxy URL" description="Optional HTTP or HTTPS proxy. Restart the miner after changing it."><Input value={draft.proxy || ""} placeholder="https://proxy.example:8080" onChange={(event) => onChange("proxy", event.target.value)} /></Field>
         <Field label="Language" description="Used for miner status messages after restart."><select className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm" value={draft.language || "English"} onChange={(event) => onChange("language", event.target.value)}>{(draft.languages || ["English"]).map((language) => <option key={language}>{language}</option>)}</select></Field>
         <Field label={`Connection quality: ${draft.connection_quality || 1}`} description="Higher values use longer network timeouts for slower connections."><input className="w-full accent-[var(--primary)]" type="range" min="1" max="6" value={draft.connection_quality || 1} onChange={(event) => onChange("connection_quality", Number(event.target.value))} /></Field>
+      </SettingsGroup>
+      <SettingsGroup title="Discord notifications" icon={<DiscordLogoIcon />}>
+        <div className="rounded-xl bg-muted p-4">
+          <div className="flex items-center justify-between gap-4"><div><p className="text-sm font-medium">{notifications.webhook_label || "Not configured"}</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">The saved token stays on this server and is never returned to the browser.</p></div><Badge variant="secondary" className={notifications.configured ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}>{notifications.configured ? "Configured" : "Not configured"}</Badge></div>
+        </div>
+        <Field label="Webhook URL" description="Paste an official Discord channel webhook. Saving a blank field keeps the existing URL."><Input type="password" autoComplete="off" value={notificationDraft.webhook_url} placeholder={notifications.configured ? "Saved webhook is hidden" : "https://discord.com/api/webhooks/..."} onChange={(event) => onNotificationChange("webhook_url", event.target.value)} /></Field>
+        <Toggle label="Enable notifications" description="Send messages only for categories in the priority list." checked={notificationDraft.enabled} onChange={(value) => onNotificationChange("enabled", value)} />
+        <Toggle label="Claimed Drops" description="Include reward art, category art, and campaign progress." checked={notificationDraft.notify_claimed} onChange={(value) => onNotificationChange("notify_claimed", value)} />
+        <Toggle label="New priority Drops" description="Send one structured message when new rewards are detected." checked={notificationDraft.notify_new_drops} onChange={(value) => onNotificationChange("notify_new_drops", value)} />
+        <Toggle label="Mining status" description="Report start, recovery, completion, and priority-channel problems." checked={notificationDraft.notify_status} onChange={(value) => onNotificationChange("notify_status", value)} />
+        <Toggle label="Operational alerts" description="Optional global crash and Twitch verification alerts. These are not category-specific." checked={notificationDraft.notify_operational} onChange={(value) => onNotificationChange("notify_operational", value)} />
+        {notificationMessage && <p className="text-sm text-emerald-600 dark:text-emerald-400" role="status">{notificationMessage}</p>}
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+          <Button disabled={!notificationDirty || busy.startsWith("notifications")} onClick={onSaveNotifications}><FloppyDiskIcon />{busy === "notifications" ? "Saving" : "Save webhook"}</Button>
+          <Button variant="outline" disabled={!notifications.configured || notificationDirty || busy.startsWith("notifications")} onClick={onTestNotifications}><PaperPlaneTiltIcon />{busy === "notifications-test" ? "Sending" : "Send test"}</Button>
+          <Button variant="ghost" className="text-destructive hover:text-destructive" disabled={!notifications.configured || busy.startsWith("notifications")} onClick={onRemoveNotifications}><TrashIcon />{busy === "notifications-remove" ? "Removing" : "Remove"}</Button>
+        </div>
       </SettingsGroup>
       <SettingsGroup title="Security" icon={<KeyIcon />}>
         <p className="text-sm leading-relaxed text-muted-foreground">Changing the admin password revokes every browser session. Invalidating Twitch auth removes the saved Twitch token and starts device login again.</p>

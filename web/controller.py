@@ -13,11 +13,13 @@ from core.settings import Settings
 from core.translate import _
 from core.utils import lock_file
 from network.twitch import Twitch
+from web.discord import DiscordNotifier
 from web.manager import WebManager
 
 
 class MinerController:
-    def __init__(self) -> None:
+    def __init__(self, notifier: DiscordNotifier | None = None) -> None:
+        self.notifier = notifier
         self.manager: WebManager | None = None
         self._client: Twitch | None = None
         self._task: asyncio.Task[None] | None = None
@@ -39,11 +41,13 @@ class MinerController:
             await asyncio.sleep(0)
             return True
 
-    async def stop(self) -> bool:
+    async def stop(self, *, notify: bool = True) -> bool:
         async with self._lock:
             if not self.running or self.manager is None:
                 return False
             task = self._task
+            if notify and self.notifier is not None:
+                self.notifier.miner_stopped(self.manager)
             self.manager.close()
         if task is not None:
             try:
@@ -55,7 +59,7 @@ class MinerController:
 
     async def close(self) -> None:
         if self.running:
-            await self.stop()
+            await self.stop(notify=False)
 
     async def _run(self) -> None:
         success, instance_lock = lock_file(LOCK_PATH)
@@ -83,7 +87,10 @@ class MinerController:
                 logging.getLogger("TwitchDrops.gql").setLevel(settings.debug_gql)
                 logging.getLogger("TwitchDrops.websocket").setLevel(settings.debug_ws)
                 self._logging_configured = True
-            client = Twitch(settings, gui_factory=WebManager)
+            client = Twitch(
+                settings,
+                gui_factory=lambda twitch: WebManager(twitch, self.notifier),
+            )
             self._client = client
             self.manager = client.gui
             try:
@@ -94,6 +101,8 @@ class MinerController:
         except CaptchaRequired:
             self.last_error = _("error", "captcha")
             client.print(self.last_error)
+            if self.notifier is not None:
+                self.notifier.operational("Twitch verification required", self.last_error)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -101,6 +110,10 @@ class MinerController:
             if self._client is not None:
                 self._client.print("Fatal error encountered:")
                 self._client.print(self.last_error)
+            if self.notifier is not None:
+                self.notifier.operational(
+                    "Miner stopped unexpectedly", self.last_error.splitlines()[-1]
+                )
         finally:
             if self._client is not None:
                 await self._client.shutdown()
@@ -120,12 +133,14 @@ class MinerController:
             "campaigns": [],
             "websockets": [],
             "settings": {},
+            "notifications": self.notifier.snapshot() if self.notifier is not None else {},
             "selected_channel_id": None,
             "logs": [],
         }
         if not self.running:
             state["login"]["activation_url"] = ""
             state["login"]["user_code"] = ""
+        state["notifications"] = self.notifier.snapshot() if self.notifier is not None else {}
         return {
             **state,
             "miner": {

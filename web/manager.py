@@ -6,11 +6,14 @@ from typing import Any, TYPE_CHECKING
 from yarl import URL
 
 from core.constants import LANG_PATH
-from tui.manager import TUIInventory, TUIManager
+from core.translate import _
+from tui.manager import TUIChannels, TUIInventory, TUIManager
 
 if TYPE_CHECKING:
     from models.inventory import DropsCampaign, TimedDrop
+    from models.channel import Channel
     from network.twitch import Twitch
+    from web.discord import DiscordNotifier
 
 
 class WebInventory(TUIInventory):
@@ -25,12 +28,32 @@ class WebInventory(TUIInventory):
     async def add_campaign(self, campaign: DropsCampaign) -> None:
         self.campaigns[campaign.id] = campaign
         await super().add_campaign(campaign)
+        if self._manager.notifier is not None:
+            self._manager.notifier.observe_campaign(
+                campaign, list(self._manager._twitch.settings.priority)
+            )
+
+    def update_drop(self, drop: TimedDrop) -> None:
+        super().update_drop(drop)
+        if self._manager.notifier is not None:
+            self._manager.notifier.drop_updated(
+                drop, list(self._manager._twitch.settings.priority)
+            )
+
+
+class WebChannels(TUIChannels):
+    def set_watching(self, channel: Channel) -> None:
+        super().set_watching(channel)
+        if self._manager.notifier is not None:
+            self._manager.notifier.watching(self._manager, channel)
 
 
 class WebManager(TUIManager):
-    def __init__(self, twitch: Twitch) -> None:
+    def __init__(self, twitch: Twitch, notifier: DiscordNotifier | None = None) -> None:
         super().__init__(twitch)
+        self.notifier = notifier
         self.inv = WebInventory(self)
+        self.channels = WebChannels(self)
         self._selected_channel_id: str | None = None
 
     def start(self) -> None:
@@ -41,6 +64,16 @@ class WebManager(TUIManager):
 
     def stop(self) -> None:
         self.progress.stop_timer()
+
+    def set_games(self, games: set[Any]) -> None:
+        super().set_games(games)
+        if self.notifier is not None:
+            self.notifier.finish_inventory()
+
+    def print(self, message: str) -> None:
+        super().print(message)
+        if self.notifier is not None and message == _("status", "no_channel"):
+            self.notifier.idle(self)
 
     def selected_channel_id(self) -> str | None:
         return self._selected_channel_id
