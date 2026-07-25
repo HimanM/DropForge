@@ -539,6 +539,8 @@ class TUIManager:
 
     def _invalidate_auth(self) -> None:
         self._twitch._auth_state.invalidate()
+        self.state.login = LoginSnapshot(status=_("gui", "login", "required"))
+        self.refresh_login()
         self._twitch.change_state(State.RESTART)
 
     def _switch_channel(self) -> None:

@@ -7,7 +7,7 @@ import traceback
 from argparse import Namespace
 from typing import Any
 
-from core.constants import FILE_FORMATTER, LOCK_PATH, LOG_PATH
+from core.constants import COOKIES_PATH, FILE_FORMATTER, LOCK_PATH, LOG_PATH
 from core.exceptions import CaptchaRequired
 from core.settings import Settings
 from core.translate import _
@@ -60,6 +60,15 @@ class MinerController:
     async def close(self) -> None:
         if self.running:
             await self.stop(notify=False)
+
+    async def reset_auth(self) -> bool:
+        if self.running:
+            if self.manager is None:
+                return False
+            self.manager.invalidate_auth()
+            return True
+        COOKIES_PATH.unlink(missing_ok=True)
+        return await self.start()
 
     async def _run(self) -> None:
         success, instance_lock = lock_file(LOCK_PATH)
