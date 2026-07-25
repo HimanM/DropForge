@@ -193,8 +193,10 @@ export function Dashboard({ session, onSignedOut }: Props) {
     try {
       await api(path, options)
       await load(true)
+      return true
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Action failed.")
+      return false
     } finally {
       setBusy("")
     }
@@ -203,6 +205,10 @@ export function Dashboard({ session, onSignedOut }: Props) {
   async function logout() {
     await runAction("logout", "/api/logout")
     onSignedOut()
+  }
+
+  async function resetTwitch() {
+    if (await runAction("invalidate", "/api/miner/invalidate-auth")) setTab("overview")
   }
 
   function changeSetting<K extends keyof Settings>(key: K, value: Settings[K]) {
@@ -350,13 +356,13 @@ export function Dashboard({ session, onSignedOut }: Props) {
                 </div>
               </section>
 
-              {state.login.activation_url && (
+              {state.miner.running && state.login.user_id === "-" && (
                 <section className="rounded-2xl border border-orange-500/25 bg-orange-500/8 p-5 sm:flex sm:items-center sm:justify-between sm:gap-6">
                   <div>
-                    <p className="font-semibold">Connect Twitch</p>
-                    <p className="mt-1 text-sm text-muted-foreground">Open Twitch activation and enter code <strong className="text-foreground">{state.login.user_code}</strong>.</p>
+                    <p className="font-semibold">{state.login.activation_url ? "Connect Twitch" : "Preparing Twitch login"}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">{state.login.activation_url ? <>Open Twitch activation and enter code <strong className="text-foreground">{state.login.user_code}</strong>.</> : "Waiting for Twitch’s authorization service. The activation code will appear here automatically."}</p>
                   </div>
-                  <a className="mt-4 inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground sm:mt-0" href={state.login.activation_url} rel="noreferrer" target="_blank">Open Twitch<LinkSimpleIcon /></a>
+                  {state.login.activation_url && <a className="mt-4 inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground sm:mt-0" href={state.login.activation_url} rel="noreferrer" target="_blank">Open Twitch<LinkSimpleIcon /></a>}
                 </section>
               )}
 
@@ -388,7 +394,7 @@ export function Dashboard({ session, onSignedOut }: Props) {
         <TabsContent value="campaigns" className="min-h-0 overflow-hidden pt-5"><Campaigns campaigns={state.campaigns} /></TabsContent>
         <TabsContent value="channels" className="min-h-0 overflow-hidden pt-5"><Channels state={state} busy={busy} onSelect={(id) => runAction("channel", "/api/channels/select", { method: "POST", body: JSON.stringify({ channel_id: id }) })} /></TabsContent>
         <TabsContent value="games" className="min-h-0 overflow-hidden pt-5"><GameRules draft={settingsDraft} dirty={settingsDirty} busy={busy} onChange={changeSetting} onSave={saveSettings} /></TabsContent>
-        <TabsContent value="settings" className="min-h-0 overflow-hidden pt-5"><SettingsPanel draft={settingsDraft} dirty={settingsDirty} busy={busy} session={session} notifications={state.notifications} notificationDraft={notificationDraft} notificationDirty={notificationDirty} notificationMessage={notificationMessage} onSignedOut={onSignedOut} onChange={changeSetting} onNotificationChange={changeNotification} onSave={saveSettings} onSaveNotifications={saveNotifications} onTestNotifications={testNotifications} onRemoveNotifications={removeNotifications} onInvalidate={() => runAction("invalidate", "/api/miner/invalidate-auth")} /></TabsContent>
+        <TabsContent value="settings" className="min-h-0 overflow-hidden pt-5"><SettingsPanel draft={settingsDraft} dirty={settingsDirty} busy={busy} session={session} notifications={state.notifications} notificationDraft={notificationDraft} notificationDirty={notificationDirty} notificationMessage={notificationMessage} onSignedOut={onSignedOut} onChange={changeSetting} onNotificationChange={changeNotification} onSave={saveSettings} onSaveNotifications={saveNotifications} onTestNotifications={testNotifications} onRemoveNotifications={removeNotifications} onInvalidate={resetTwitch} /></TabsContent>
         <TabsContent value="logs" className="min-h-0 overflow-hidden pt-5"><Logs logs={state.logs} /></TabsContent>
       </Tabs>
 

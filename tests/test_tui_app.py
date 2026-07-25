@@ -268,9 +268,12 @@ class TUIManagerTests(unittest.IsolatedAsyncioTestCase):
             change_state=events.append,
         )
 
-        TUIManager(twitch)._invalidate_auth()
+        manager = TUIManager(twitch)
+        manager._invalidate_auth()
 
         self.assertEqual(events, ["invalidate", State.RESTART])
+        self.assertEqual(manager.state.login.status, "Login required")
+        self.assertEqual(manager.state.login.user_id, "-")
 
     def test_inventory_snapshot_reads_settings_from_manager(self):
         settings = SimpleNamespace(

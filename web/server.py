@@ -232,14 +232,17 @@ def create_app(auth_path: Path, static_path: Path, *, auto_start: bool = True) -
         session = await _session(request, csrf=True)
         if isinstance(session, web.Response):
             return session
-        manager = request.app["controller"].manager
-        if manager is None or not request.app["controller"].running:
-            return _json_error("Miner is not running.", 409)
+        controller = request.app["controller"]
         action = request.match_info["action"]
+        if action == "invalidate-auth":
+            if not await controller.reset_auth():
+                return _json_error("Miner is still starting. Try again shortly.", 409)
+            return web.json_response({"ok": True})
+        manager = controller.manager
+        if manager is None or not controller.running:
+            return _json_error("Miner is not running.", 409)
         if action == "reload":
             manager.reload()
-        elif action == "invalidate-auth":
-            manager.invalidate_auth()
         else:
             return _json_error("Unknown miner action.", 404)
         return web.json_response({"ok": True})

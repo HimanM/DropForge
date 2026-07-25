@@ -1,6 +1,6 @@
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -78,6 +78,32 @@ class WebResponseTests(unittest.IsolatedAsyncioTestCase):
             async with TestClient(TestServer(app)) as client:
                 response = await client.get("/api/session")
                 self.assertEqual(response.headers["Cache-Control"], "no-store")
+
+    async def test_twitch_login_can_be_reset_while_miner_is_stopped(self):
+        with tempfile.TemporaryDirectory() as directory:
+            auth_path = Path(directory, "auth.sqlite3")
+            cookies_path = Path(directory, "cookies.jar")
+            cookies_path.write_text("saved Twitch session", encoding="utf8")
+            AuthStore(auth_path).provision(
+                "correct horse battery", "recovery-code-long-enough"
+            )
+            app = create_app(auth_path, Path(directory), auto_start=False)
+            controller = app["controller"]
+            controller.start = AsyncMock(return_value=True)
+            with patch("web.controller.COOKIES_PATH", cookies_path):
+                async with TestClient(TestServer(app)) as client:
+                    login = await client.post(
+                        "/api/login", json={"password": "correct horse battery"}
+                    )
+                    csrf = (await login.json())["csrf_token"]
+                    response = await client.post(
+                        "/api/miner/invalidate-auth",
+                        headers={"X-CSRF-Token": csrf},
+                    )
+
+            self.assertEqual(response.status, 200)
+            self.assertFalse(cookies_path.exists())
+            controller.start.assert_awaited_once()
 
 
 if __name__ == "__main__":
