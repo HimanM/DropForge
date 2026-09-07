@@ -65,6 +65,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("TwitchDrops")
 gql_logger = logging.getLogger("TwitchDrops.gql")
+PERSISTED_QUERY_WARNING_AFTER = 15 * 60
 
 
 class SkipExtraJsonDecoder(json.JSONDecoder):
@@ -1379,14 +1380,19 @@ class Twitch:
         backoff = ExponentialBackoff(maximum=60)
         # Use a flag to retry the request a single time, if a specific set of errors is encountered
         single_retry: bool = True
+        persisted_query_since: float | None = None
+        persisted_query_warned = False
         for delay in backoff:
             async with self._qgl_limiter:
                 auth_state = await self.get_auth()
+                headers = auth_state.headers(user_agent=self._client_type.USER_AGENT, gql=True)
+                if persisted_query_since is not None:
+                    headers["Connection"] = "close"
                 async with self.request(
                     "POST",
                     "https://gql.twitch.tv/gql",
                     json=ops,
-                    headers=auth_state.headers(user_agent=self._client_type.USER_AGENT, gql=True),
+                    headers=headers,
                 ) as response:
                     response_json: JsonType | list[JsonType] = await response.json()
             gql_logger.debug(f"GQL Response: {response_json}")
@@ -1403,10 +1409,7 @@ class Twitch:
                         if "message" in error_dict:
                             if (
                                 single_retry
-                                and error_dict["message"] in (
-                                    "service error",
-                                    "PersistedQueryNotFound",
-                                )
+                                and error_dict["message"] == "service error"
                             ):
                                 logger.error(
                                     f"Retrying a {error_dict['message']} for "
@@ -1416,6 +1419,27 @@ class Twitch:
                                 if delay < 5:
                                     # overwrite the delay if too short
                                     delay = 5
+                                force_retry = True
+                                break
+                            elif error_dict["message"] == "PersistedQueryNotFound":
+                                operation = response_json.get("extensions", {}).get(
+                                    "operationName", "unknown operation"
+                                )
+                                logger.error(f"Retrying a PersistedQueryNotFound for {operation}")
+                                if persisted_query_since is None:
+                                    persisted_query_since = time()
+                                if (
+                                    not persisted_query_warned
+                                    and time() - persisted_query_since
+                                    >= PERSISTED_QUERY_WARNING_AFTER
+                                ):
+                                    self.print(
+                                        f"Twitch still rejects persisted query {operation} after "
+                                        "15 minutes. DropForge may require an update; retrying "
+                                        "automatically."
+                                    )
+                                    persisted_query_warned = True
+                                delay = max(delay, 5)
                                 force_retry = True
                                 break
                             elif error_dict["message"] == "server error":

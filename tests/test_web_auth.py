@@ -1,3 +1,4 @@
+import asyncio
 import tempfile
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -65,6 +66,36 @@ class WebStateTests(unittest.TestCase):
 
         self.assertEqual(snapshot["login"]["activation_url"], "")
         self.assertEqual(snapshot["login"]["user_code"], "")
+
+
+class MinerSupervisorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_failed_engine_restarts_until_stopped(self) -> None:
+        controller = MinerController()
+        controller._run_once = AsyncMock(side_effect=[True, False])
+
+        async def timeout(awaitable, **_kwargs):
+            awaitable.close()
+            raise asyncio.TimeoutError
+
+        with patch(
+            "web.controller.asyncio.wait_for",
+            new=timeout,
+        ):
+            await controller._run()
+
+        self.assertEqual(controller._run_once.await_count, 2)
+
+    async def test_manual_stop_prevents_restart(self) -> None:
+        controller = MinerController()
+
+        async def stopped_attempt():
+            controller._stop_requested.set()
+            return True
+
+        controller._run_once = AsyncMock(side_effect=stopped_attempt)
+        await controller._run()
+
+        controller._run_once.assert_awaited_once()
 
 
 class WebResponseTests(unittest.IsolatedAsyncioTestCase):
