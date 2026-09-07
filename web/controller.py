@@ -5,13 +5,14 @@ import io
 import logging
 import traceback
 from argparse import Namespace
+from time import monotonic
 from typing import Any
 
 from core.constants import COOKIES_PATH, FILE_FORMATTER, LOCK_PATH, LOG_PATH
 from core.exceptions import CaptchaRequired
 from core.settings import Settings
 from core.translate import _
-from core.utils import lock_file
+from core.utils import ExponentialBackoff, lock_file
 from network.twitch import Twitch
 from web.discord import DiscordNotifier
 from web.manager import WebManager
@@ -26,6 +27,7 @@ class MinerController:
         self._lock = asyncio.Lock()
         self._instance_lock: io.TextIOWrapper | None = None
         self._logging_configured = False
+        self._stop_requested = asyncio.Event()
         self.last_error = ""
 
     @property
@@ -37,18 +39,21 @@ class MinerController:
             if self.running:
                 return False
             self.last_error = ""
+            self._stop_requested.clear()
             self._task = asyncio.create_task(self._run(), name="tdminer")
             await asyncio.sleep(0)
             return True
 
     async def stop(self, *, notify: bool = True) -> bool:
         async with self._lock:
-            if not self.running or self.manager is None:
+            if not self.running:
                 return False
+            self._stop_requested.set()
             task = self._task
-            if notify and self.notifier is not None:
+            if notify and self.notifier is not None and self.manager is not None:
                 self.notifier.miner_stopped(self.manager)
-            self.manager.close()
+            if self.manager is not None:
+                self.manager.close()
         if task is not None:
             try:
                 await asyncio.wait_for(asyncio.shield(task), timeout=20)
@@ -71,11 +76,36 @@ class MinerController:
         return await self.start()
 
     async def _run(self) -> None:
+        backoff = ExponentialBackoff(variance=0, maximum=60)
+        while not self._stop_requested.is_set():
+            started = monotonic()
+            restart = await self._run_once()
+            if not restart or self._stop_requested.is_set():
+                return
+            if monotonic() - started >= 5 * 60:
+                backoff.reset()
+            delay = min(5 * next(backoff), 60)
+            logger = logging.getLogger("TwitchDrops")
+            logger.warning("Miner engine restarting automatically in %d seconds", delay)
+            if self.notifier is not None:
+                self.notifier.operational(
+                    "Miner restarting automatically",
+                    f"DropForge encountered an unexpected error and will retry in {delay:.0f} seconds.",
+                    event_key="miner-restart",
+                )
+            try:
+                await asyncio.wait_for(self._stop_requested.wait(), timeout=delay)
+            except asyncio.TimeoutError:
+                pass
+
+    async def _run_once(self) -> bool:
         success, instance_lock = lock_file(LOCK_PATH)
         if not success:
             self.last_error = f"Another tdminer instance is already running or the lock is busy: {LOCK_PATH}"
-            return
+            return False
         self._instance_lock = instance_lock
+        restart = False
+        self.last_error = ""
         args = Namespace(
             log=True,
             tray=False,
@@ -109,20 +139,18 @@ class MinerController:
             await client.run()
         except CaptchaRequired:
             self.last_error = _("error", "captcha")
-            client.print(self.last_error)
+            if self._client is not None:
+                self._client.print(self.last_error)
             if self.notifier is not None:
                 self.notifier.operational("Twitch verification required", self.last_error)
         except asyncio.CancelledError:
             raise
         except Exception:
+            restart = True
             self.last_error = traceback.format_exc()
             if self._client is not None:
                 self._client.print("Fatal error encountered:")
                 self._client.print(self.last_error)
-            if self.notifier is not None:
-                self.notifier.operational(
-                    "Miner stopped unexpectedly", self.last_error.splitlines()[-1]
-                )
         finally:
             if self._client is not None:
                 await self._client.shutdown()
@@ -131,6 +159,7 @@ class MinerController:
             self._client = None
             instance_lock.close()
             self._instance_lock = None
+        return restart
 
     def snapshot(self) -> dict[str, Any]:
         state = self.manager.snapshot() if self.manager is not None else {

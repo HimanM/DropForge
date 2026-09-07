@@ -234,8 +234,13 @@ class DiscordNotifier:
             image=_image(drop.campaign.image_url),
         ))
 
-    def operational(self, title: str, detail: str) -> None:
-        if self._enabled("operational"):
+    def operational(self, title: str, detail: str, *, event_key: str = "") -> None:
+        if self._enabled("operational") and (
+            not event_key
+            or self.store.claim_notification_event(
+                f"discord:operational:{event_key}", cooldown=6 * 60 * 60
+            )
+        ):
             self._schedule(self._payload([self._embed(title, detail, _RED)]))
 
     def _enabled(self, event: str) -> bool:

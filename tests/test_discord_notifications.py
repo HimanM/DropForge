@@ -120,6 +120,14 @@ class DiscordNotificationTests(unittest.TestCase):
             "Mining resumed",
         ])
 
+    def test_operational_events_are_deduplicated(self) -> None:
+        self.notifier.update({"notify_operational": True})
+
+        self.notifier.operational("Miner restarting", "Retrying", event_key="restart")
+        self.notifier.operational("Miner restarting", "Retrying", event_key="restart")
+
+        self.assertEqual(len(self.payloads), 1)
+
 
 class DiscordNotificationApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_authenticated_update_never_returns_the_webhook_token(self) -> None:

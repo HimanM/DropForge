@@ -74,6 +74,12 @@ class WebManager(TUIManager):
         super().print(message)
         if self.notifier is not None and message == _("status", "no_channel"):
             self.notifier.idle(self)
+        elif self.notifier is not None and message.startswith(
+            "Twitch still rejects persisted query "
+        ):
+            self.notifier.operational(
+                "Twitch query unavailable", message, event_key=message.split(" after ", 1)[0]
+            )
 
     def selected_channel_id(self) -> str | None:
         return self._selected_channel_id
