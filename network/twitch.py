@@ -112,6 +112,31 @@ async def validate_auth_token(token: str) -> tuple[Any, int, int]:
         campaign_count = 0
         gql_success = False
         try:
+            integrity_client_id = (
+                client.CLIENT_ID
+                if client.CLIENT_ID in (ClientType.WEB.CLIENT_ID, ClientType.ANDROID_APP.CLIENT_ID)
+                else ClientType.WEB.CLIENT_ID
+            )
+            async with session.post(
+                "https://gql.twitch.tv/integrity",
+                headers={
+                    "Accept": "*/*",
+                    "Accept-Encoding": "gzip",
+                    "Accept-Language": "en-US",
+                    "Client-Id": integrity_client_id,
+                    "User-Agent": client.USER_AGENT,
+                    "Authorization": f"OAuth {token}",
+                },
+                json={},
+            ) as response:
+                if response.status in (200, 429):
+                    integrity_payload = await response.json()
+                    if isinstance(integrity_payload, dict) and "token" in integrity_payload:
+                        headers["Client-Integrity"] = integrity_payload["token"]
+        except Exception as exc:
+            logger.debug("Integrity probe error: %s", exc)
+
+        try:
             async with session.post(
                 "https://gql.twitch.tv/gql", headers=headers, json=GQL_QUERIES["Campaigns"]
             ) as response:
@@ -201,12 +226,15 @@ class _AuthState:
     def __init__(self, twitch: Twitch):
         self._twitch: Twitch = twitch
         self._lock = asyncio.Lock()
+        self._integrity_lock = asyncio.Lock()
         self._logged_in = asyncio.Event()
         self.user_id: int
         self.device_id: str
         self.session_id: str
         self.access_token: str
         self.client_version: str
+        self.integrity_token: str | None = None
+        self.integrity_expires_at: float = 0.0
 
     def _hasattrs(self, *attrs: str) -> bool:
         return all(hasattr(self, attr) for attr in attrs)
@@ -243,6 +271,8 @@ class _AuthState:
             "access_token",
             "client_version",
         )
+        self.integrity_token = None
+        self.integrity_expires_at = 0.0
         self._logged_in.clear()
 
     async def _oauth_login(self) -> str:
@@ -509,8 +539,63 @@ class _AuthState:
         if gql:
             headers["Origin"] = str(client_info.CLIENT_URL)
             headers["Referer"] = str(client_info.CLIENT_URL)
-            headers["Authorization"] = f"OAuth {self.access_token}"
+            if hasattr(self, "access_token"):
+                headers["Authorization"] = f"OAuth {self.access_token}"
+            if getattr(self, "integrity_token", None):
+                headers["Client-Integrity"] = self.integrity_token
         return headers
+
+    async def get_integrity_token(self, *, force_refresh: bool = False) -> str | None:
+        now = time()
+        if not force_refresh and self.integrity_token and now < (self.integrity_expires_at - 60):
+            return self.integrity_token
+
+        async with self._integrity_lock:
+            now = time()
+            if not force_refresh and self.integrity_token and now < (self.integrity_expires_at - 60):
+                return self.integrity_token
+
+            client_info: ClientInfo = self._twitch._client_type
+            client_id = (
+                client_info.CLIENT_ID
+                if client_info.CLIENT_ID in (ClientType.WEB.CLIENT_ID, ClientType.ANDROID_APP.CLIENT_ID)
+                else ClientType.WEB.CLIENT_ID
+            )
+            headers = {
+                "Accept": "*/*",
+                "Accept-Encoding": "gzip",
+                "Accept-Language": "en-US",
+                "Client-Id": client_id,
+                "User-Agent": client_info.USER_AGENT,
+            }
+            if hasattr(self, "session_id"):
+                headers["Client-Session-Id"] = self.session_id
+            if hasattr(self, "device_id"):
+                headers["X-Device-Id"] = self.device_id
+            if hasattr(self, "access_token"):
+                headers["Authorization"] = f"OAuth {self.access_token}"
+
+            try:
+                async with self._twitch.request(
+                    "POST", "https://gql.twitch.tv/integrity", headers=headers, json={}
+                ) as response:
+                    if response.status in (200, 429):
+                        payload: JsonType = await response.json(loads=SAFE_LOADS)
+                        if isinstance(payload, dict) and "token" in payload:
+                            self.integrity_token = str(payload["token"])
+                            raw_exp = payload.get("expiration")
+                            if isinstance(raw_exp, (int, float)):
+                                exp_sec = raw_exp / 1000.0 if raw_exp > 1e11 else float(raw_exp)
+                                self.integrity_expires_at = exp_sec
+                            else:
+                                self.integrity_expires_at = time() + 6 * 3600
+                            logger.debug("Acquired Twitch Client-Integrity token")
+                            return self.integrity_token
+                    logger.debug("Twitch integrity endpoint returned HTTP %s", response.status)
+            except Exception as exc:
+                logger.debug("Failed to obtain Twitch Client-Integrity token: %s", exc)
+
+            return self.integrity_token
 
     async def validate(self):
         async with self._lock:
@@ -597,11 +682,17 @@ class _AuthState:
                 if alt_url != client_info.CLIENT_URL:
                     jar.update_cookies(cookie, alt_url)
             jar.save(COOKIES_PATH)
+            try:
+                await self.get_integrity_token()
+            except Exception as exc:
+                logger.debug("Initial integrity token fetch error: %s", exc)
         self._logged_in.set()
 
     def invalidate(self, *, delete_cookies: bool = False) -> None:
         access_token = getattr(self, "access_token", None)
         self._delattrs("access_token", "user_id")
+        self.integrity_token = None
+        self.integrity_expires_at = 0.0
         session = self._twitch._session
         if session is None:
             return
@@ -1607,11 +1698,14 @@ class Twitch:
         backoff = ExponentialBackoff(maximum=60)
         # Use a flag to retry the request a single time, if a specific set of errors is encountered
         single_retry: bool = True
+        integrity_retry: bool = True
         persisted_query_since: float | None = None
         persisted_query_warned = False
         for delay in backoff:
             async with self._qgl_limiter:
                 auth_state = await self.get_auth()
+                if hasattr(auth_state, "get_integrity_token"):
+                    await auth_state.get_integrity_token()
                 headers = auth_state.headers(user_agent=self._client_type.USER_AGENT, gql=True)
                 if persisted_query_since is not None:
                     headers["Connection"] = "close"
@@ -1648,6 +1742,34 @@ class Twitch:
                                     delay = 5
                                 force_retry = True
                                 break
+                            elif (
+                                error_dict.get("message") == "failed integrity check"
+                                or error_dict.get("extensions", {}).get("code") == "IntegrityCheckFailed"
+                            ):
+                                if integrity_retry:
+                                    logger.warning(
+                                        "Twitch integrity check failed; refreshing Client-Integrity token"
+                                    )
+                                    integrity_retry = False
+                                    if hasattr(auth_state, "get_integrity_token"):
+                                        await auth_state.get_integrity_token(force_refresh=True)
+                                    if delay < 2:
+                                        delay = 2
+                                    force_retry = True
+                                    break
+                                elif "path" in error_dict and "data" in response_json:
+                                    logger.warning(
+                                        "Integrity check still failing after refresh for %s; continuing with partial data",
+                                        error_dict.get("path"),
+                                    )
+                                    data_dict: JsonType = response_json.get("data")
+                                    path: list[str] = error_dict.get("path", [])
+                                    for key in path[:-1]:
+                                        if isinstance(data_dict, dict) and key in data_dict:
+                                            data_dict = data_dict[key]
+                                    if isinstance(data_dict, dict) and path and path[-1] in data_dict:
+                                        data_dict[path[-1]] = None
+                                    break
                             elif error_dict["message"] == "PersistedQueryNotFound":
                                 operation = response_json.get("extensions", {}).get(
                                     "operationName", "unknown operation"
@@ -1744,21 +1866,30 @@ class Twitch:
         status_update(_("gui", "status", "fetching_inventory"))
         # fetch in-progress campaigns (inventory)
         response = await self.gql_request(GQL_QUERIES["Inventory"])
-        inventory: JsonType = response["data"]["currentUser"]["inventory"]
-        ongoing_campaigns: list[JsonType] = inventory["dropCampaignsInProgress"] or []
+        inventory: JsonType = (
+            (response.get("data", {}) or {}).get("currentUser", {}) or {}
+        ).get("inventory") or {}
+        ongoing_campaigns: list[JsonType] = inventory.get("dropCampaignsInProgress") or []
         # this contains claimed benefit edge IDs, not drop IDs
+        game_event_drops: list[JsonType] = inventory.get("gameEventDrops") or []
         claimed_benefits: dict[str, datetime] = {
-            b["id"]: timestamp(b["lastAwardedAt"]) for b in inventory["gameEventDrops"]
+            b["id"]: timestamp(b["lastAwardedAt"])
+            for b in game_event_drops
+            if isinstance(b, dict) and "id" in b and "lastAwardedAt" in b
         }
-        inventory_data: dict[str, JsonType] = {c["id"]: c for c in ongoing_campaigns}
+        inventory_data: dict[str, JsonType] = {
+            c["id"]: c for c in ongoing_campaigns if isinstance(c, dict) and "id" in c
+        }
         # fetch general available campaigns data (campaigns)
         response = await self.gql_request(GQL_QUERIES["Campaigns"])
-        available_list: list[JsonType] = response["data"]["currentUser"]["dropCampaigns"] or []
+        available_list: list[JsonType] = (
+            (response.get("data", {}) or {}).get("currentUser", {}) or {}
+        ).get("dropCampaigns") or []
         applicable_statuses = ("ACTIVE", "UPCOMING")
         available_campaigns: dict[str, JsonType] = {
             c["id"]: c
             for c in available_list
-            if c["status"] in applicable_statuses  # that are currently not expired
+            if isinstance(c, dict) and c.get("status") in applicable_statuses  # that are currently not expired
         }
         # fetch detailed data for each campaign, in chunks
         status_update(_("gui", "status", "fetching_campaigns"))
