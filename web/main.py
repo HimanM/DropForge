@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import getpass
 import os
 import secrets
@@ -56,7 +57,7 @@ def reset_password() -> int:
 def import_twitch_session() -> int:
     token = getpass.getpass("Twitch auth-token cookie: ")
     try:
-        result = __import__("asyncio").run(import_auth_token(token))
+        result = asyncio.run(import_auth_token(token))
     except ValueError as exc:
         raise SystemExit(f"Token not imported: {exc}") from None
     print(

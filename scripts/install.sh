@@ -163,6 +163,35 @@ if [ "$os" = "Linux" ]; then
     fi
   }
 
+  install_campaign_browser() {
+    browser=""
+    for candidate in google-chrome-stable google-chrome chromium chromium-browser; do
+      if command -v "$candidate" >/dev/null 2>&1; then
+        browser="$candidate"
+        break
+      fi
+    done
+    if [ -n "$browser" ] && command -v xvfb-run >/dev/null 2>&1; then
+      return
+    fi
+    echo "Installing Chromium and Xvfb for Twitch campaign discovery."
+    if command -v apt-get >/dev/null 2>&1; then
+      as_root apt-get update
+      if apt-cache show chromium >/dev/null 2>&1; then
+        as_root apt-get install -y chromium xvfb
+      else
+        as_root apt-get install -y chromium-browser xvfb
+      fi
+    elif command -v dnf >/dev/null 2>&1; then
+      as_root dnf install -y chromium xorg-x11-server-Xvfb
+    elif command -v pacman >/dev/null 2>&1; then
+      as_root pacman -Sy --needed --noconfirm chromium xorg-server-xvfb
+    else
+      echo "Install Chromium and Xvfb, or set TDMINER_BROWSER to a Chromium executable." >&2
+      exit 1
+    fi
+  }
+
   if ! command -v curl >/dev/null 2>&1 \
     || ! command -v tar >/dev/null 2>&1 \
     || ! command -v python3 >/dev/null 2>&1; then
@@ -172,6 +201,7 @@ if [ "$os" = "Linux" ]; then
     echo "DropForge currently requires a systemd-based Linux server." >&2
     exit 1
   fi
+  install_campaign_browser
 
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT

@@ -136,6 +136,33 @@ class WebResponseTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(cookies_path.exists())
             controller.start.assert_awaited_once()
 
+    async def test_twitch_token_import_never_echoes_secret(self):
+        with tempfile.TemporaryDirectory() as directory:
+            auth_path = Path(directory, "auth.sqlite3")
+            AuthStore(auth_path).provision(
+                "correct horse battery", "recovery-code-long-enough"
+            )
+            app = create_app(auth_path, Path(directory), auto_start=False)
+            app["controller"].import_twitch_token = AsyncMock(
+                return_value={"client": "Twitch web", "user_id": 123, "campaign_count": 42}
+            )
+            async with TestClient(TestServer(app)) as client:
+                login = await client.post(
+                    "/api/login", json={"password": "correct horse battery"}
+                )
+                csrf = (await login.json())["csrf_token"]
+                secret = "temporary_auth_token_value_12345"
+                response = await client.post(
+                    "/api/twitch/import-token",
+                    headers={"X-CSRF-Token": csrf},
+                    json={"token": secret},
+                )
+                body = await response.json()
+
+            self.assertEqual(response.status, 200)
+            self.assertNotIn(secret, str(body))
+            app["controller"].import_twitch_token.assert_awaited_once_with(secret)
+
 
 if __name__ == "__main__":
     unittest.main()

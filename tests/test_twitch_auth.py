@@ -10,7 +10,7 @@ import aiohttp
 from yarl import URL
 
 from core.constants import ClientType
-from core.exceptions import LoginException
+from core.exceptions import GQLException, LoginException
 from network.twitch import Twitch, _AuthState, import_auth_token, validate_auth_token
 
 
@@ -51,6 +51,14 @@ class TwitchAuthTests(unittest.TestCase):
 
 
 class TwitchTokenImportAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.integrity = patch(
+            "network.twitch.acquire_integrity_token",
+            new=AsyncMock(return_value=("test_integrity_token_abc", 1890000000)),
+        )
+        self.integrity_mock = self.integrity.start()
+        self.addCleanup(self.integrity.stop)
+
     async def test_validate_auth_token_succeeds_with_null_campaigns(self):
         class MockSession:
             def __init__(self, *_args, **_kwargs):
@@ -148,7 +156,7 @@ class TwitchTokenImportAsyncTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(user_id, 987654)
             self.assertEqual(count, 2)
 
-    async def test_validate_auth_token_falls_back_to_inventory_on_campaign_gql_error(self):
+    async def test_validate_auth_token_retries_persisted_query(self):
         post_calls = []
 
         class MockSession:
@@ -192,10 +200,10 @@ class TwitchTokenImportAsyncTests(unittest.IsolatedAsyncioTestCase):
                     async def json(self):
                         if not post_calls:
                             return {}
-                        if post_calls[-1] == "ViewerDropsDashboard":
+                        if len(post_calls) == 1:
                             return {"errors": [{"message": "PersistedQueryNotFound"}]}
                         return {
-                            "data": {"currentUser": {"inventory": {"dropCampaignsInProgress": [{"id": "c1"}]}}}
+                            "data": {"currentUser": {"dropCampaigns": [{"id": "c1"}]}}
                         }
 
                 return Resp()
@@ -205,7 +213,7 @@ class TwitchTokenImportAsyncTests(unittest.IsolatedAsyncioTestCase):
             self.assertIs(client, ClientType.WEB)
             self.assertEqual(user_id, 55555)
             self.assertEqual(count, 1)
-            self.assertEqual(post_calls, ["ViewerDropsDashboard", "Inventory"])
+            self.assertEqual(post_calls, ["ViewerDropsDashboard", "ViewerDropsDashboard"])
 
     async def test_validate_auth_token_rejects_invalid_token(self):
         class MockSession:
@@ -265,7 +273,7 @@ class TwitchTokenImportAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("auth-token", found)
         self.assertEqual(found["auth-token"].value, "secret_token")
 
-    async def test_import_auth_token_saves_cookies_for_both_web_and_mobile(self):
+    async def test_import_auth_token_saves_domain_wide_cookie(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             cookie_file = Path(temp_dir, "cookies.jar")
             with patch("network.twitch.validate_auth_token", return_value=(ClientType.WEB, 12345, 3)):
@@ -277,6 +285,19 @@ class TwitchTokenImportAsyncTests(unittest.IsolatedAsyncioTestCase):
             loaded_jar.load(cookie_file)
             self.assertIn("auth-token", loaded_jar.filter_cookies(URL("https://www.twitch.tv")))
             self.assertIn("auth-token", loaded_jar.filter_cookies(URL("https://m.twitch.tv")))
+            self.assertIn("auth-token", loaded_jar.filter_cookies(URL("https://gql.twitch.tv")))
+
+    async def test_failed_import_preserves_saved_session(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cookie_file = Path(temp_dir, "cookies.jar")
+            cookie_file.write_bytes(b"existing session")
+            with patch(
+                "network.twitch.validate_auth_token",
+                side_effect=ValueError("invalid token"),
+            ):
+                with self.assertRaisesRegex(ValueError, "invalid token"):
+                    await import_auth_token("invalid_token_value_here_12345", path=cookie_file)
+            self.assertEqual(cookie_file.read_bytes(), b"existing session")
 
 
     async def test_validate_auth_token_includes_integrity_token(self):
@@ -320,8 +341,6 @@ class TwitchTokenImportAsyncTests(unittest.IsolatedAsyncioTestCase):
                         pass
 
                     async def json(self):
-                        if "integrity" in url:
-                            return {"token": "test_integrity_token_abc"}
                         return {"data": {"currentUser": {"dropCampaigns": [{"id": "c1"}]}}}
 
                 return Resp()
@@ -333,46 +352,32 @@ class TwitchTokenImportAsyncTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(any(h.get("Client-Integrity") == "test_integrity_token_abc" for h in gql_headers))
 
     async def test_get_integrity_token_caches_and_refreshes(self):
-        fetch_count = 0
-
-        class MockTwitchResponse:
-            status = 200
-
-            async def json(self, loads=None):
-                nonlocal fetch_count
-                fetch_count += 1
-                return {"token": f"token_{fetch_count}", "expiration": 1890000000000}
-
-        class MockTwitchRequest:
-            async def __aenter__(self):
-                return MockTwitchResponse()
-
-            async def __aexit__(self, *args):
-                return False
-
         twitch = SimpleNamespace(
             _client_type=ClientType.WEB,
-            request=lambda *args, **kwargs: MockTwitchRequest(),
         )
         auth = _AuthState(twitch)
         auth.session_id = "test-session"
         auth.device_id = "test-device"
         auth.access_token = "test-access"
+        self.integrity_mock.side_effect = [
+            ("token_1", 1890000000),
+            ("token_2", 1890000000),
+        ]
 
         # First fetch acquires token
         token1 = await auth.get_integrity_token()
         self.assertEqual(token1, "token_1")
-        self.assertEqual(fetch_count, 1)
+        self.assertEqual(self.integrity_mock.await_count, 1)
 
         # Subsequent fetch uses cache
         token2 = await auth.get_integrity_token()
         self.assertEqual(token2, "token_1")
-        self.assertEqual(fetch_count, 1)
+        self.assertEqual(self.integrity_mock.await_count, 1)
 
         # Force refresh fetches a new token
         token3 = await auth.get_integrity_token(force_refresh=True)
         self.assertEqual(token3, "token_2")
-        self.assertEqual(fetch_count, 2)
+        self.assertEqual(self.integrity_mock.await_count, 2)
 
     def test_auth_headers_include_client_integrity(self):
         twitch = SimpleNamespace(_client_type=ClientType.WEB)
@@ -444,7 +449,7 @@ class TwitchTokenImportAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(refresh_called)
         self.assertEqual(result["data"]["currentUser"]["dropCampaigns"], [{"id": "c1"}])
 
-    async def test_gql_request_nullifies_field_on_unresolvable_integrity_failure(self):
+    async def test_gql_request_raises_on_unresolvable_integrity_failure(self):
         class MockGQLResponse:
             async def json(self):
                 return {
@@ -479,8 +484,8 @@ class TwitchTokenImportAsyncTests(unittest.IsolatedAsyncioTestCase):
         auth.get_integrity_token = AsyncMock(return_value="mock_integrity")
         twitch.request = lambda method, url, **kwargs: MockRequestCtx(MockGQLResponse())
 
-        result = await twitch.gql_request({"operationName": "ViewerDropsDashboard"})
-        self.assertIsNone(result["data"]["currentUser"]["dropCampaigns"])
+        with self.assertRaises(GQLException):
+            await twitch.gql_request({"operationName": "ViewerDropsDashboard"})
 
     async def test_fetch_inventory_handles_empty_or_null_campaigns_safely(self):
         gui = SimpleNamespace(status=SimpleNamespace(update=Mock()), inv=SimpleNamespace(clear=Mock(), add=Mock()))

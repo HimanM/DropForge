@@ -6,6 +6,7 @@ import logging
 import inspect
 import os
 import shutil
+from http.cookies import SimpleCookie
 from time import time
 from copy import deepcopy
 from itertools import chain
@@ -21,6 +22,7 @@ from yarl import URL
 from core.translate import _
 from models.channel import Channel
 from network.websocket import WebsocketPool
+from network.integrity import acquire_integrity_token
 from models.inventory import DropsCampaign
 from core.exceptions import (
     ExitRequest,
@@ -109,72 +111,44 @@ async def validate_auth_token(token: str) -> tuple[Any, int, int]:
             "Origin": str(client.CLIENT_URL),
             "Referer": str(client.CLIENT_URL),
         }
-        campaign_count = 0
-        gql_success = False
-        try:
-            integrity_client_id = (
-                client.CLIENT_ID
-                if client.CLIENT_ID in (ClientType.WEB.CLIENT_ID, ClientType.ANDROID_APP.CLIENT_ID)
-                else ClientType.WEB.CLIENT_ID
-            )
-            async with session.post(
-                "https://gql.twitch.tv/integrity",
-                headers={
-                    "Accept": "*/*",
-                    "Accept-Encoding": "gzip",
-                    "Accept-Language": "en-US",
-                    "Client-Id": integrity_client_id,
-                    "User-Agent": client.USER_AGENT,
-                    "Authorization": f"OAuth {token}",
-                },
-                json={},
-            ) as response:
-                if response.status in (200, 429):
-                    integrity_payload = await response.json()
-                    if isinstance(integrity_payload, dict) and "token" in integrity_payload:
-                        headers["Client-Integrity"] = integrity_payload["token"]
-        except Exception as exc:
-            logger.debug("Integrity probe error: %s", exc)
+        headers["X-Device-Id"] = create_nonce(CHARS_HEX_LOWER, 32)
+        headers["Client-Session-Id"] = create_nonce(CHARS_HEX_LOWER, 16)
+        if client is ClientType.WEB:
+            try:
+                integrity_token, _ = await acquire_integrity_token(
+                    {"Client-ID": client.CLIENT_ID, "Authorization": f"OAuth {token}"},
+                    headers["X-Device-Id"],
+                )
+            except RuntimeError as exc:
+                raise ValueError(str(exc)) from None
+            headers["Client-Integrity"] = integrity_token
 
-        try:
+        payload: JsonType = {}
+        for attempt in range(2):
             async with session.post(
                 "https://gql.twitch.tv/gql", headers=headers, json=GQL_QUERIES["Campaigns"]
             ) as response:
                 payload = await response.json()
-            if response.status == 200 and isinstance(payload, dict):
-                current_user = payload.get("data", {}).get("currentUser")
-                if isinstance(current_user, dict):
-                    gql_success = True
-                    campaigns = current_user.get("dropCampaigns")
-                    if isinstance(campaigns, list):
-                        campaign_count = len(campaigns)
-        except Exception as exc:
-            logger.debug("ViewerDropsDashboard probe error: %s", exc)
-
-        if not gql_success:
-            try:
-                async with session.post(
-                    "https://gql.twitch.tv/gql", headers=headers, json=GQL_QUERIES["Inventory"]
-                ) as response:
-                    payload = await response.json()
-                if response.status == 200 and isinstance(payload, dict):
-                    current_user = payload.get("data", {}).get("currentUser")
-                    if isinstance(current_user, dict):
-                        gql_success = True
-                        inventory = current_user.get("inventory", {})
-                        if isinstance(inventory, dict):
-                            in_progress = inventory.get("dropCampaignsInProgress")
-                            if isinstance(in_progress, list):
-                                campaign_count = len(in_progress)
-            except Exception as exc:
-                logger.debug("Inventory probe error: %s", exc)
-
-        if not gql_success:
-            logger.warning(
-                "Twitch token validated for user %s, but GQL campaigns query could not be verified immediately. "
-                "DropForge will retry via self-healing queries during runtime.",
-                validation.get("user_id"),
-            )
+            errors = payload.get("errors", []) if isinstance(payload, dict) else []
+            if attempt == 0 and any(error.get("message") == "PersistedQueryNotFound" for error in errors):
+                await asyncio.sleep(1)
+                continue
+            break
+        if response.status != 200 or not isinstance(payload, dict):
+            raise ValueError("Twitch could not verify campaign access for this token.")
+        if any(
+            error.get("message") == "failed integrity check"
+            or error.get("extensions", {}).get("code") == "IntegrityCheckFailed"
+            for error in payload.get("errors", [])
+        ):
+            raise ValueError("Twitch rejected the browser integrity proof. Try importing the token again.")
+        current_user = (payload.get("data") or {}).get("currentUser")
+        if not isinstance(current_user, dict):
+            raise ValueError("This Twitch token cannot read the drops campaign list.")
+        campaigns = current_user.get("dropCampaigns")
+        if campaigns is not None and not isinstance(campaigns, list):
+            raise ValueError("Twitch returned an invalid drops campaign list.")
+        campaign_count = len(campaigns or [])
 
     return client, int(validation["user_id"]), campaign_count
 
@@ -191,15 +165,14 @@ async def import_auth_token(token: str, path: os.PathLike[str] = COOKIES_PATH) -
         except Exception as exc:
             raise ValueError("The saved Twitch session could not be read; it was not changed.") from exc
         shutil.copy2(cookie_path, f"{cookie_path}.backup")
-    jar.clear(lambda cookie: cookie.key == "auth-token")
-    jar.update_cookies(
-        {"auth-token": token, "persistent": str(user_id)}, response_url=client.CLIENT_URL
-    )
-    for alt_url in (URL("https://www.twitch.tv"), URL("https://m.twitch.tv")):
-        if alt_url != client.CLIENT_URL:
-            jar.update_cookies(
-                {"auth-token": token, "persistent": str(user_id)}, response_url=alt_url
-            )
+    jar.clear(lambda cookie: cookie.key in {"auth-token", "persistent"})
+    cookies = SimpleCookie()
+    for name, value in (("auth-token", token), ("persistent", str(user_id))):
+        cookies[name] = value
+        cookies[name]["domain"] = ".twitch.tv"
+        cookies[name]["path"] = "/"
+        cookies[name]["secure"] = True
+    jar.update_cookies(cookies, response_url=URL("https://www.twitch.tv"))
     temporary = f"{cookie_path}.new"
     jar.save(temporary)
     with suppress(OSError):
@@ -546,6 +519,8 @@ class _AuthState:
         return headers
 
     async def get_integrity_token(self, *, force_refresh: bool = False) -> str | None:
+        if self._twitch._client_type is not ClientType.WEB:
+            return None
         now = time()
         if not force_refresh and self.integrity_token and now < (self.integrity_expires_at - 60):
             return self.integrity_token
@@ -555,45 +530,18 @@ class _AuthState:
             if not force_refresh and self.integrity_token and now < (self.integrity_expires_at - 60):
                 return self.integrity_token
 
-            client_info: ClientInfo = self._twitch._client_type
-            client_id = (
-                client_info.CLIENT_ID
-                if client_info.CLIENT_ID in (ClientType.WEB.CLIENT_ID, ClientType.ANDROID_APP.CLIENT_ID)
-                else ClientType.WEB.CLIENT_ID
-            )
-            headers = {
-                "Accept": "*/*",
-                "Accept-Encoding": "gzip",
-                "Accept-Language": "en-US",
-                "Client-Id": client_id,
-                "User-Agent": client_info.USER_AGENT,
-            }
-            if hasattr(self, "session_id"):
-                headers["Client-Session-Id"] = self.session_id
-            if hasattr(self, "device_id"):
-                headers["X-Device-Id"] = self.device_id
-            if hasattr(self, "access_token"):
-                headers["Authorization"] = f"OAuth {self.access_token}"
-
             try:
-                async with self._twitch.request(
-                    "POST", "https://gql.twitch.tv/integrity", headers=headers, json={}
-                ) as response:
-                    if response.status in (200, 429):
-                        payload: JsonType = await response.json(loads=SAFE_LOADS)
-                        if isinstance(payload, dict) and "token" in payload:
-                            self.integrity_token = str(payload["token"])
-                            raw_exp = payload.get("expiration")
-                            if isinstance(raw_exp, (int, float)):
-                                exp_sec = raw_exp / 1000.0 if raw_exp > 1e11 else float(raw_exp)
-                                self.integrity_expires_at = exp_sec
-                            else:
-                                self.integrity_expires_at = time() + 6 * 3600
-                            logger.debug("Acquired Twitch Client-Integrity token")
-                            return self.integrity_token
-                    logger.debug("Twitch integrity endpoint returned HTTP %s", response.status)
-            except Exception as exc:
-                logger.debug("Failed to obtain Twitch Client-Integrity token: %s", exc)
+                self.integrity_token, self.integrity_expires_at = await acquire_integrity_token(
+                    {
+                        "Client-ID": ClientType.WEB.CLIENT_ID,
+                        "Authorization": f"OAuth {self.access_token}",
+                    },
+                    self.device_id,
+                )
+                logger.debug("Acquired Twitch Client-Integrity token")
+                return self.integrity_token
+            except RuntimeError as exc:
+                logger.warning("Failed to obtain Twitch browser integrity: %s", exc)
 
             return self.integrity_token
 
@@ -1757,19 +1705,7 @@ class Twitch:
                                         delay = 2
                                     force_retry = True
                                     break
-                                elif "path" in error_dict and "data" in response_json:
-                                    logger.warning(
-                                        "Integrity check still failing after refresh for %s; continuing with partial data",
-                                        error_dict.get("path"),
-                                    )
-                                    data_dict: JsonType = response_json.get("data")
-                                    path: list[str] = error_dict.get("path", [])
-                                    for key in path[:-1]:
-                                        if isinstance(data_dict, dict) and key in data_dict:
-                                            data_dict = data_dict[key]
-                                    if isinstance(data_dict, dict) and path and path[-1] in data_dict:
-                                        data_dict[path[-1]] = None
-                                    break
+                                raise GQLException(response_json["errors"])
                             elif error_dict["message"] == "PersistedQueryNotFound":
                                 operation = response_json.get("extensions", {}).get(
                                     "operationName", "unknown operation"
