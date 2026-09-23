@@ -278,7 +278,12 @@ def create_app(auth_path: Path, static_path: Path, *, auto_start: bool = True) -
                 if body["priority_mode"] not in manager.PRIORITY_MODE_LABELS.values():
                     raise ValueError("Invalid priority mode.")
                 clean["priority_mode"] = body["priority_mode"]
-            for key in ("farm_unlinked", "enable_badges_emotes", "trust_allowed_channels"):
+            for key in (
+                "farm_unlinked",
+                "enable_badges_emotes",
+                "auto_farm_badges",
+                "trust_allowed_channels",
+            ):
                 if key in body:
                     if not isinstance(body[key], bool):
                         raise ValueError(f"{key} must be true or false.")

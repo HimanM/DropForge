@@ -61,6 +61,7 @@ export type Settings = {
   priority_modes: string[]
   farm_unlinked: boolean
   enable_badges_emotes: boolean
+  auto_farm_badges: boolean
   available_drops_check: boolean
   trust_allowed_channels: boolean
   proxy: string

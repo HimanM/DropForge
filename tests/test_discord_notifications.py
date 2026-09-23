@@ -27,6 +27,7 @@ def campaign(game_name: str = "Priority Game", drop_id: str = "drop-1") -> Simpl
         required_minutes=60,
         ends_at=datetime.now(timezone.utc) + timedelta(days=1),
         is_claimed=False,
+        is_free_badge=False,
     )
     item = SimpleNamespace(
         id=f"campaign-{drop_id}",
@@ -39,6 +40,7 @@ def campaign(game_name: str = "Priority Game", drop_id: str = "drop-1") -> Simpl
         claimed_drops=1,
         total_drops=2,
         finished=False,
+        has_free_badge=False,
         can_earn_within=lambda _: True,
     )
     drop.campaign = item
@@ -118,6 +120,24 @@ class DiscordNotificationTests(unittest.TestCase):
         self.assertEqual([payload["embeds"][0]["title"] for payload in self.payloads], [
             "Drops disabled on live channels",
             "Mining resumed",
+        ])
+
+    def test_badge_events_use_priority_filter_and_badge_formatting(self) -> None:
+        selected = campaign()
+        selected.has_free_badge = True
+        selected.drops[0].is_free_badge = True
+        manager = SimpleNamespace(
+            _twitch=SimpleNamespace(settings=SimpleNamespace(priority=["Priority Game"])),
+            inv=SimpleNamespace(campaigns={selected.id: selected}),
+        )
+
+        self.notifier.badge_farming_started(manager, [selected.game])
+        selected.drops[0].is_claimed = True
+        self.notifier.drop_updated(selected.drops[0], ["Priority Game"])
+
+        self.assertEqual([payload["embeds"][0]["title"] for payload in self.payloads], [
+            "Free badge fallback active",
+            "Free badge earned",
         ])
 
     def test_operational_events_are_deduplicated(self) -> None:

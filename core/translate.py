@@ -171,6 +171,7 @@ class GUISettingsAdvanced(TypedDict):
     warning: str
     warning_text: str
     enable_badges_emotes: str
+    auto_farm_badges: str
     available_drops_check: str
     trust_allowed_channels: str
     farm_unlinked: str
@@ -386,6 +387,7 @@ default_translation: Translation = {
                     "make sure all of these options are disabled."
                 ),
                 "enable_badges_emotes": "Enable partial support for badges and emotes: ",
+                "auto_farm_badges": "Auto-farm free badges when idle: ",
                 "available_drops_check": "Enable extra available drops check: ",
                 "trust_allowed_channels": "Trust explicitly allowed channels: ",
                 "farm_unlinked": "Farm unlinked drops: ",

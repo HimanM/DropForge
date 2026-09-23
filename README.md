@@ -20,6 +20,7 @@ The miner advances Twitch drop progress without playing video. It logs in to Twi
 - Game priority and exclusion lists.
 - Automatic channel selection and manual channel switching.
 - Optional unlinked-drop farming for the Twitch linked-account display bug.
+- Optional idle farming for free watch-time badges; subscription (`0/0`) badges are skipped.
 - One-command Linux Web UI or CLI installer with in-place updates and persistent data.
 
 ## Desktop Install
@@ -184,6 +185,8 @@ Type `/help` in the CLI to view all commands grouped by category with descriptio
 | `/mode <mode>` | Set priority mode: `priority-only`, `ending-soonest`, `low-availability` |
 | `/filter <name> <on\|off>` | Toggle filters: `not-linked`, `upcoming`, `expired`, `excluded`, `finished` |
 | `/farm-unlinked on\|off` | Enable/disable farming unlinked drops (priority-only mode) |
+| `/badges on\|off` | Include badge and emote campaigns in normal farming |
+| `/auto-badges on\|off` | Farm free watch-time badges only when priority work is idle |
 
 ### System
 
@@ -208,6 +211,7 @@ c  copy Twitch login URL when login is pending
 
 - Priority mode controls how games are selected.
 - Farm unlinked drops only works in priority-only mode.
+- Auto-farm free badges is off by default. Priority work always wins, and completed badges are remembered across updates.
 - Priority and exclude changes require an inventory reload before they affect channel selection.
 - Link Twitch campaigns to game accounts on https://www.twitch.tv/drops/campaigns when required by the campaign.
 

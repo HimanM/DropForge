@@ -21,6 +21,8 @@ class SettingsFile(TypedDict):
     connection_quality: int
     tray_notifications: bool
     enable_badges_emotes: bool
+    auto_farm_badges: bool
+    completed_badges: set[str]
     available_drops_check: bool
     trust_allowed_channels: bool
     farm_unlinked: bool
@@ -37,6 +39,8 @@ default_settings: SettingsFile = {
     "language": DEFAULT_LANG,
     "tray_notifications": True,
     "enable_badges_emotes": False,
+    "auto_farm_badges": False,
+    "completed_badges": set(),
     "available_drops_check": False,
     "trust_allowed_channels": False,
     "farm_unlinked": False,
@@ -63,6 +67,8 @@ class Settings:
     connection_quality: int
     tray_notifications: bool
     enable_badges_emotes: bool
+    auto_farm_badges: bool
+    completed_badges: set[str]
     available_drops_check: bool
     trust_allowed_channels: bool
     farm_unlinked: bool

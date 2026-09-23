@@ -442,6 +442,7 @@ class Twitch:
         self._state: State = State.IDLE
         self._state_change = asyncio.Event()
         self.wanted_games: list[Game] = []
+        self.badge_farming: bool = False
         self.inventory: list[DropsCampaign] = []
         self._drops: dict[str, TimedDrop] = {}
         self._campaigns: dict[str, DropsCampaign] = {}
@@ -578,6 +579,26 @@ class Twitch:
         self.gui.save(force=force)
         self.settings.save(force=force)
 
+    def mark_badge_complete(self, drop: TimedDrop) -> None:
+        if drop.is_claimed:
+            return
+        drop.is_claimed = True
+        self.settings.completed_badges.add(drop.id)
+        self.settings.alter()
+        self.settings.save()
+        message = f"Free badge completed: {drop.name} ({drop.campaign.game})"
+        logger.info(message)
+        self.print(message)
+        self.change_state(State.INVENTORY_FETCH)
+
+    def _try_badge_fallback(self) -> bool:
+        if not self.settings.auto_farm_badges or self.badge_farming:
+            return False
+        self.badge_farming = True
+        self.print("Priority work is idle; checking free watch-time badges.")
+        self.change_state(State.GAMES_UPDATE)
+        return True
+
     def get_priority(self, channel: Channel) -> int:
         """
         Return a priority number for a given channel.
@@ -652,6 +673,7 @@ class Twitch:
                 # clear the flag and wait until it's set again
                 self._state_change.clear()
             elif self._state is State.INVENTORY_FETCH:
+                self.badge_farming = False
                 self.gui.tray.change_icon("maint")
                 # ensure the websocket is running
                 await self.websocket.start()
@@ -692,12 +714,31 @@ class Twitch:
                         game not in self.wanted_games  # isn't already there
                         # and isn't excluded by list or priority mode
                         and game.name not in exclude
-                        and (not priority_only or game.name in priority)
+                        and (
+                            self.badge_farming
+                            or not priority_only
+                            or game.name in priority
+                        )
                         # and can be progressed within the next hour
                         and campaign.can_earn_within(next_hour)
                     ):
                         # non-excluded games with no priority are placed last, below priority ones
                         self.wanted_games.append(game)
+                if self.badge_farming:
+                    if self.wanted_games:
+                        names = [game.name for game in self.wanted_games]
+                        preview = ", ".join(names[:8])
+                        if len(names) > 8:
+                            preview += f" (+{len(names) - 8} more)"
+                        label = "category" if len(names) == 1 else "categories"
+                        self.print(
+                            f"Free badge fallback found {len(names)} {label}: {preview}"
+                        )
+                        callback = getattr(self.gui, "badge_farming_started", None)
+                        if callback is not None:
+                            callback(self.wanted_games)
+                    else:
+                        self.print("No free watch-time badge drops are currently farmable.")
                 full_cleanup = True
                 self.restart_watching()
                 self.change_state(State.CHANNELS_CLEANUP)
@@ -738,12 +779,13 @@ class Twitch:
                 if self.wanted_games:
                     self.change_state(State.CHANNELS_FETCH)
                 else:
-                    # with no games available, we switch to IDLE after cleanup
-                    self.print(_("status", "no_campaign"))
-                    campaign_summary = self._idle_campaign_summary()
-                    if campaign_summary is not None:
-                        self.print(campaign_summary)
-                    self.change_state(State.IDLE)
+                    if not self._try_badge_fallback():
+                        # with no games available, we switch to IDLE after cleanup
+                        self.print(_("status", "no_campaign"))
+                        campaign_summary = self._idle_campaign_summary()
+                        if campaign_summary is not None:
+                            self.print(campaign_summary)
+                        self.change_state(State.IDLE)
             elif self._state is State.CHANNELS_FETCH:
                 self.gui.status.update(_("gui", "status", "gathering"))
                 # start with all current channels, clear the memory and GUI
@@ -885,12 +927,13 @@ class Twitch:
                     # break the state change chain by clearing the flag
                     self._state_change.clear()
                 else:
-                    # not watching anything and there isn't anything to watch either
-                    self.print(_("status", "no_channel"))
-                    channel_summary = self._idle_channel_summary()
-                    if channel_summary is not None:
-                        self.print(channel_summary)
-                    self.change_state(State.IDLE)
+                    if not self._try_badge_fallback():
+                        # not watching anything and there isn't anything to watch either
+                        self.print(_("status", "no_channel"))
+                        channel_summary = self._idle_channel_summary()
+                        if channel_summary is not None:
+                            self.print(channel_summary)
+                        self.change_state(State.IDLE)
                 del new_watching, selected_channel, watching_channel
             elif self._state is State.EXIT:
                 self.gui.tray.change_icon("pickaxe")
@@ -1287,7 +1330,8 @@ class Twitch:
             if data["type"] in (
                 "user_drop_reward_reminder_notification",  # drop confirmation
                 "quests_viewer_reward_campaign_earned_emote",  # emote confirmation
-                # badge confirmation?
+                # Badge completion is confirmed from watch progress until Twitch exposes
+                # a stable badge notification shape.
             ):
                 self.change_state(State.INVENTORY_FETCH)
                 try:

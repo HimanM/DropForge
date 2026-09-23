@@ -165,6 +165,7 @@ class TwitchDropsTUI(App[None]):
         on_set_priority_mode: abc.Callable[[str], None],
         on_set_farm_unlinked: abc.Callable[[bool], None],
         on_set_badges_emotes: abc.Callable[[bool], None],
+        on_set_auto_farm_badges: abc.Callable[[bool], None],
         on_set_trust_allowed_channels: abc.Callable[[bool], None],
         on_invalidate_auth: abc.Callable[[], None] = lambda: None,
         on_ready: abc.Callable[[], None] | None = None,
@@ -185,6 +186,7 @@ class TwitchDropsTUI(App[None]):
         self._on_set_priority_mode = on_set_priority_mode
         self._on_set_farm_unlinked = on_set_farm_unlinked
         self._on_set_badges_emotes = on_set_badges_emotes
+        self._on_set_auto_farm_badges = on_set_auto_farm_badges
         self._on_set_trust_allowed_channels = on_set_trust_allowed_channels
         self._on_ready = on_ready or (lambda: None)
         self._ready_for_refresh = False
@@ -241,6 +243,11 @@ class TwitchDropsTUI(App[None]):
                             yield Checkbox(
                                 "badges and emotes",
                                 id="badges-emotes",
+                                compact=True,
+                            )
+                            yield Checkbox(
+                                "auto-farm free badges when idle",
+                                id="auto-farm-badges",
                                 compact=True,
                             )
                             yield Checkbox(
@@ -477,6 +484,10 @@ class TwitchDropsTUI(App[None]):
         if badges_emotes is not None:
             badges_emotes.value = self.state.enable_badges_emotes
 
+        auto_farm_badges = self._widget("#auto-farm-badges", Checkbox)
+        if auto_farm_badges is not None:
+            auto_farm_badges.value = self.state.auto_farm_badges
+
         trust_allowed = self._widget("#trust-allowed-channels", Checkbox)
         if trust_allowed is not None:
             trust_allowed.value = self.state.trust_allowed_channels
@@ -608,6 +619,10 @@ class TwitchDropsTUI(App[None]):
         if checkbox_id == "badges-emotes":
             if event.value != self.state.enable_badges_emotes:
                 self._on_set_badges_emotes(event.value)
+            return
+        if checkbox_id == "auto-farm-badges":
+            if event.value != self.state.auto_farm_badges:
+                self._on_set_auto_farm_badges(event.value)
             return
         if checkbox_id == "trust-allowed-channels":
             if event.value != self.state.trust_allowed_channels:

@@ -115,6 +115,7 @@ class TUIState:
     priority_mode: str = "Priority list only"
     farm_unlinked: bool = False
     enable_badges_emotes: bool = False
+    auto_farm_badges: bool = False
     trust_allowed_channels: bool = False
     campaign_filters: CampaignFilters = field(default_factory=CampaignFilters)
     login: LoginSnapshot = field(default_factory=LoginSnapshot)

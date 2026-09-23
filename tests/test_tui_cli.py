@@ -15,6 +15,7 @@ class SettingsStub:
         self.exclude = set()
         self.farm_unlinked = False
         self.enable_badges_emotes = False
+        self.auto_farm_badges = False
         self.trust_allowed_channels = False
         self.priority_mode = PriorityMode.PRIORITY_ONLY
         self.saved = False
@@ -46,6 +47,7 @@ class PortableCLITests(unittest.TestCase):
         self.assertIn("/priority bump", PortableCLIManager.COMMANDS)
         self.assertIn("/priority demote", PortableCLIManager.COMMANDS)
         self.assertIn("/badges on", PortableCLIManager.COMMANDS)
+        self.assertIn("/auto-badges on", PortableCLIManager.COMMANDS)
 
     def test_command_completer_triggers_from_slash_prefix(self):
         completer = CommandCompleter(PortableCLIManager.COMMANDS)
@@ -147,6 +149,15 @@ class PortableCLITests(unittest.TestCase):
 
         self.assertTrue(manager.state.enable_badges_emotes)
         self.assertTrue(manager._twitch.settings.enable_badges_emotes)
+        self.assertTrue(manager._twitch.settings.saved)
+
+    def test_auto_badges_command_updates_setting(self):
+        manager = self.make_manager()
+
+        manager._handle_command("/auto-badges on")
+
+        self.assertTrue(manager.state.auto_farm_badges)
+        self.assertTrue(manager._twitch.settings.auto_farm_badges)
         self.assertTrue(manager._twitch.settings.saved)
 
     def test_trust_allowed_command_updates_setting(self):

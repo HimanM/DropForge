@@ -175,6 +175,9 @@ class PortableCLIManager(TUIManager):
         "/badges",
         "/badges on",
         "/badges off",
+        "/auto-badges",
+        "/auto-badges on",
+        "/auto-badges off",
         "/trust-allowed",
         "/trust-allowed on",
         "/trust-allowed off",
@@ -391,6 +394,8 @@ class PortableCLIManager(TUIManager):
             self._set_farm_unlinked(rest.lower() in {"1", "on", "true", "yes"})
         elif command in {"badges", "badges-emotes"}:
             self._set_badges_emotes(rest.lower() in {"1", "on", "true", "yes"})
+        elif command == "auto-badges":
+            self._set_auto_farm_badges(rest.lower() in {"1", "on", "true", "yes"})
         elif command == "trust-allowed":
             self._set_trust_allowed_channels(rest.lower() in {"1", "on", "true", "yes"})
         elif command == "detach":
@@ -413,7 +418,7 @@ class PortableCLIManager(TUIManager):
             return list(self.state.exclude)
         if command == "/switch":
             return [channel.name for channel in self.state.channels.values()]
-        if command in {"/farm-unlinked", "/badges", "/trust-allowed", "/filter not-linked", "/filter upcoming", "/filter expired", "/filter excluded", "/filter finished"}:
+        if command in {"/farm-unlinked", "/badges", "/auto-badges", "/trust-allowed", "/filter not-linked", "/filter upcoming", "/filter expired", "/filter excluded", "/filter finished"}:
             return ["on", "off"]
         if command == "/mode":
             return ["priority-only", "ending-soonest", "low-availability"]
@@ -775,6 +780,7 @@ class PortableCLIManager(TUIManager):
         status_table.add_row("Websockets", Text(f"{spinner} {websockets} connected", style=_C_GREEN if websockets > 0 else _C_YELLOW))
         status_table.add_row("Mode", Text(self.state.priority_mode, style=_C_AMBER))
         status_table.add_row("Farm unlinked", Text("on" if self.state.farm_unlinked else "off", style=_C_GREEN if self.state.farm_unlinked else _C_DIM))
+        status_table.add_row("Auto badges", Text("on" if self.state.auto_farm_badges else "off", style=_C_GREEN if self.state.auto_farm_badges else _C_DIM))
         status_table.add_row("Trust allowed", Text("on" if self.state.trust_allowed_channels else "off", style=_C_GREEN if self.state.trust_allowed_channels else _C_DIM))
 
         status_panel = Panel(status_table, title=f"[bold {_C_CYAN}]Status[/]", border_style=_C_PANEL_BORDER)
@@ -951,6 +957,7 @@ class PortableCLIManager(TUIManager):
         table.add_row("Mode", Text(self.state.priority_mode, style=_C_AMBER))
         table.add_row("Farm unlinked", Text("on" if self.state.farm_unlinked else "off", style=_C_GREEN if self.state.farm_unlinked else _C_DIM))
         table.add_row("Badges/emotes", Text("on" if self.state.enable_badges_emotes else "off", style=_C_GREEN if self.state.enable_badges_emotes else _C_DIM))
+        table.add_row("Auto free badges", Text("on" if self.state.auto_farm_badges else "off", style=_C_GREEN if self.state.auto_farm_badges else _C_DIM))
         table.add_row("Trust allowed", Text("on" if self.state.trust_allowed_channels else "off", style=_C_GREEN if self.state.trust_allowed_channels else _C_DIM))
         table.add_row("Available", Text(f"{len(self.state.available_games)} games", style=_C_TEXT))
 
@@ -1020,7 +1027,8 @@ class PortableCLIManager(TUIManager):
         console.print(Text("  /priority add <game>  /priority remove <game>", style=_C_DIM))
         console.print(Text("  /priority bump <game>  /priority demote <game>", style=_C_DIM))
         console.print(Text("  /exclude add <game>  /mode <name>", style=_C_DIM))
-        console.print(Text("  /farm-unlinked on|off  /badges on|off  /trust-allowed on|off", style=_C_DIM))
+        console.print(Text("  /farm-unlinked on|off  /badges on|off  /auto-badges on|off", style=_C_DIM))
+        console.print(Text("  /trust-allowed on|off", style=_C_DIM))
 
         return console.file.getvalue()  # type: ignore[union-attr]
 
