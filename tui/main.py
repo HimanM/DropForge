@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import io
+import getpass
 import logging
 import os
 import signal
@@ -16,7 +17,7 @@ from core.exceptions import CaptchaRequired
 from core.settings import Settings
 from core.translate import _
 from core.utils import lock_file
-from network.twitch import Twitch
+from network.twitch import Twitch, import_auth_token
 from tui.cli import PortableCLIManager
 from tui.manager import TUIManager
 from version import __version__
@@ -57,6 +58,7 @@ class ParsedArgs(argparse.Namespace):
     tray: bool
     dump: bool
     frontend: str
+    import_token: bool
 
     @property
     def logging_level(self) -> int:
@@ -85,6 +87,11 @@ def parse_args(argv: list[str] | None = None) -> ParsedArgs:
         description="DropForge terminal interface for mining timed Twitch drops.",
     )
     parser.add_argument("--version", action="version", version=f"v{__version__}")
+    parser.add_argument(
+        "--import-token",
+        action="store_true",
+        help="Validate and import an existing Twitch auth-token cookie, then exit.",
+    )
     parser.add_argument(
         "frontend",
         nargs="?",
@@ -187,6 +194,18 @@ def main(argv: list[str] | None = None) -> int:
     warnings.simplefilter("default", ResourceWarning)
     if sys.version_info < (3, 10):
         raise RuntimeError("Python 3.10 or higher is required")
+
+    if args.import_token:
+        try:
+            result = asyncio.run(import_auth_token(getpass.getpass("Twitch auth-token cookie: ")))
+        except ValueError as exc:
+            print(f"Token not imported: {exc}", file=sys.stderr)
+            return 2
+        print(
+            f"Twitch session imported for user {result['user_id']} "
+            f"({result['client']}, {result['campaign_count']} campaigns visible)."
+        )
+        return 0
 
     settings = Settings(args)
     success, file = lock_file(LOCK_PATH)

@@ -4,6 +4,8 @@ import json
 import asyncio
 import logging
 import inspect
+import os
+import shutil
 from time import time
 from copy import deepcopy
 from itertools import chain
@@ -68,6 +70,123 @@ gql_logger = logging.getLogger("TwitchDrops.gql")
 PERSISTED_QUERY_WARNING_AFTER = 15 * 60
 
 
+async def validate_auth_token(token: str) -> tuple[Any, int, int]:
+    """Validate a pasted token and verify that it can read the full drops dashboard."""
+    token = token.strip()
+    if not 20 <= len(token) <= 512 or not token.isascii() or any(char.isspace() for char in token):
+        raise ValueError("Enter only the value of Twitch's auth-token cookie.")
+
+    timeout = aiohttp.ClientTimeout(total=30)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.get(
+            "https://id.twitch.tv/oauth2/validate",
+            headers={"Authorization": f"OAuth {token}"},
+        ) as response:
+            if response.status != 200:
+                raise ValueError("Twitch rejected this auth token. Copy a current auth-token cookie.")
+            validation = await response.json()
+
+        client = next(
+            (
+                candidate
+                for candidate in (ClientType.ANDROID_APP, ClientType.WEB)
+                if candidate.CLIENT_ID == validation.get("client_id")
+            ),
+            None,
+        )
+        if client is None:
+            raise ValueError(
+                "This token belongs to a restricted Twitch client. Import an auth-token from twitch.tv in a desktop browser."
+            )
+
+        headers = {
+            "Accept": "*/*",
+            "Accept-Encoding": "gzip",
+            "Accept-Language": "en-US",
+            "Client-Id": client.CLIENT_ID,
+            "Authorization": f"OAuth {token}",
+            "User-Agent": client.USER_AGENT,
+            "Origin": str(client.CLIENT_URL),
+            "Referer": str(client.CLIENT_URL),
+        }
+        campaign_count = 0
+        gql_success = False
+        try:
+            async with session.post(
+                "https://gql.twitch.tv/gql", headers=headers, json=GQL_QUERIES["Campaigns"]
+            ) as response:
+                payload = await response.json()
+            if response.status == 200 and isinstance(payload, dict):
+                current_user = payload.get("data", {}).get("currentUser")
+                if isinstance(current_user, dict):
+                    gql_success = True
+                    campaigns = current_user.get("dropCampaigns")
+                    if isinstance(campaigns, list):
+                        campaign_count = len(campaigns)
+        except Exception as exc:
+            logger.debug("ViewerDropsDashboard probe error: %s", exc)
+
+        if not gql_success:
+            try:
+                async with session.post(
+                    "https://gql.twitch.tv/gql", headers=headers, json=GQL_QUERIES["Inventory"]
+                ) as response:
+                    payload = await response.json()
+                if response.status == 200 and isinstance(payload, dict):
+                    current_user = payload.get("data", {}).get("currentUser")
+                    if isinstance(current_user, dict):
+                        gql_success = True
+                        inventory = current_user.get("inventory", {})
+                        if isinstance(inventory, dict):
+                            in_progress = inventory.get("dropCampaignsInProgress")
+                            if isinstance(in_progress, list):
+                                campaign_count = len(in_progress)
+            except Exception as exc:
+                logger.debug("Inventory probe error: %s", exc)
+
+        if not gql_success:
+            logger.warning(
+                "Twitch token validated for user %s, but GQL campaigns query could not be verified immediately. "
+                "DropForge will retry via self-healing queries during runtime.",
+                validation.get("user_id"),
+            )
+
+    return client, int(validation["user_id"]), campaign_count
+
+
+async def import_auth_token(token: str, path: os.PathLike[str] = COOKIES_PATH) -> dict[str, Any]:
+    """Validate and atomically store a Twitch auth-token without discarding other cookies."""
+    token = token.strip()
+    client, user_id, campaign_count = await validate_auth_token(token)
+    cookie_path = os.fspath(path)
+    jar = aiohttp.CookieJar()
+    if os.path.exists(cookie_path):
+        try:
+            jar.load(cookie_path)
+        except Exception as exc:
+            raise ValueError("The saved Twitch session could not be read; it was not changed.") from exc
+        shutil.copy2(cookie_path, f"{cookie_path}.backup")
+    jar.clear(lambda cookie: cookie.key == "auth-token")
+    jar.update_cookies(
+        {"auth-token": token, "persistent": str(user_id)}, response_url=client.CLIENT_URL
+    )
+    for alt_url in (URL("https://www.twitch.tv"), URL("https://m.twitch.tv")):
+        if alt_url != client.CLIENT_URL:
+            jar.update_cookies(
+                {"auth-token": token, "persistent": str(user_id)}, response_url=alt_url
+            )
+    temporary = f"{cookie_path}.new"
+    jar.save(temporary)
+    with suppress(OSError):
+        os.chmod(temporary, 0o600)
+    os.replace(temporary, cookie_path)
+    return {
+        "client": "Twitch web" if client is ClientType.WEB else "Twitch Android",
+        "user_id": user_id,
+        "campaign_count": campaign_count,
+    }
+
+
 class SkipExtraJsonDecoder(json.JSONDecoder):
     def decode(self, s: str, *args):
         # skip whitespace check
@@ -97,6 +216,25 @@ class _AuthState:
             if hasattr(self, attr):
                 delattr(self, attr)
 
+    @staticmethod
+    def _remove_auth_cookie(jar: aiohttp.CookieJar, token: str) -> None:
+        jar.clear(lambda cookie: cookie.key == "auth-token" and cookie.value == token)
+
+    @staticmethod
+    def _find_cookie(jar: aiohttp.CookieJar, client_url: URL) -> Any:
+        cookie = jar.filter_cookies(client_url)
+        if "auth-token" in cookie:
+            return cookie
+        for candidate_url in (URL("https://www.twitch.tv"), URL("https://m.twitch.tv")):
+            if candidate_url != client_url:
+                candidate = jar.filter_cookies(candidate_url)
+                if "auth-token" in candidate:
+                    return candidate
+        for (_, _), cookies in getattr(jar, "_cookies", {}).items():
+            if "auth-token" in cookies:
+                return cookies
+        return cookie
+
     def clear(self) -> None:
         self._delattrs(
             "user_id",
@@ -109,6 +247,25 @@ class _AuthState:
 
     async def _oauth_login(self) -> str:
         login_form: LoginForm = self._twitch.gui.login
+        if ask_auth_token := getattr(login_form, "ask_auth_token", None):
+            while True:
+                imported_token = await ask_auth_token()
+                if not imported_token:
+                    break
+                try:
+                    client, user_id, campaign_count = await validate_auth_token(imported_token)
+                    self._twitch._client_type = client
+                    logger.info(
+                        "Imported Twitch session for user %s with %s visible campaigns",
+                        user_id,
+                        campaign_count,
+                    )
+                    return imported_token.strip()
+                except ValueError as exc:
+                    logger.error("Failed to import Twitch session: %s", exc)
+                    self._twitch.print(f"Token import error: {exc}")
+                    if hasattr(login_form, "report_import_error"):
+                        login_form.report_import_error(str(exc))
         client_info: ClientInfo = self._twitch._client_type
         headers = {
             "Accept": "application/json",
@@ -386,7 +543,7 @@ class _AuthState:
             login_form.update(_("gui", "login", "logging_in"), None)
             for client_mismatch_attempt in range(2):
                 for invalid_token_attempt in range(2):
-                    cookie = jar.filter_cookies(client_info.CLIENT_URL)
+                    cookie = self._find_cookie(jar, client_info.CLIENT_URL)
                     if "auth-token" not in cookie:
                         self.access_token = await self._oauth_login()
                         cookie["auth-token"] = self.access_token
@@ -410,13 +567,24 @@ class _AuthState:
                             break
                 else:
                     raise RuntimeError("Login verification failure (step #2)")
-                # ensure the cookie's client ID matches the currently selected client
-                if validate_response["client_id"] == client_info.CLIENT_ID:
+                # Existing Android and browser sessions can both access the full drops API.
+                restored_client = next(
+                    (
+                        candidate
+                        for candidate in (ClientType.ANDROID_APP, ClientType.WEB)
+                        if candidate.CLIENT_ID == validate_response["client_id"]
+                    ),
+                    None,
+                )
+                if restored_client is not None:
+                    self._twitch._client_type = client_info = restored_client
+                    session.headers["User-Agent"] = restored_client.USER_AGENT
                     break
-                # otherwise, we need to delete the entire cookie file and clear the jar
+                # Remove only the incompatible token. Other saved sessions must survive.
                 logger.info("Cookie client ID mismatch")
-                jar.clear()
-                COOKIES_PATH.unlink(missing_ok=True)
+                self._remove_auth_cookie(jar, self.access_token)
+                self._delattrs("access_token")
+                jar.save(COOKIES_PATH)
             else:
                 raise RuntimeError("Login verification failure (step #1)")
             self.user_id = int(validate_response["user_id"])
@@ -425,18 +593,22 @@ class _AuthState:
             login_form.update(_("gui", "login", "logged_in"), self.user_id)
             # update our cookie and save it
             jar.update_cookies(cookie, client_info.CLIENT_URL)
+            for alt_url in (URL("https://www.twitch.tv"), URL("https://m.twitch.tv")):
+                if alt_url != client_info.CLIENT_URL:
+                    jar.update_cookies(cookie, alt_url)
             jar.save(COOKIES_PATH)
         self._logged_in.set()
 
     def invalidate(self, *, delete_cookies: bool = False) -> None:
+        access_token = getattr(self, "access_token", None)
         self._delattrs("access_token", "user_id")
         session = self._twitch._session
         if session is None:
             return
         cookie_jar = cast(aiohttp.CookieJar, session.cookie_jar)
         client_info: ClientInfo = self._twitch._client_type
-        for cookies in cookie_jar._cookies.values():
-            cookies.pop("auth-token", None)
+        if access_token is not None:
+            self._remove_auth_cookie(cookie_jar, access_token)
         if delete_cookies:
             cookie_jar.clear_domain(client_info.CLIENT_URL.host)
             COOKIES_PATH.unlink(missing_ok=True)

@@ -9,6 +9,7 @@ from pathlib import Path
 from aiohttp import web
 
 from core.constants import WORKING_DIR
+from network.twitch import import_auth_token
 from web.auth import AuthStore, PASSWORD_MIN_LENGTH, validate_password
 from web.server import create_app
 
@@ -52,6 +53,19 @@ def reset_password() -> int:
     return 0
 
 
+def import_twitch_session() -> int:
+    token = getpass.getpass("Twitch auth-token cookie: ")
+    try:
+        result = __import__("asyncio").run(import_auth_token(token))
+    except ValueError as exc:
+        raise SystemExit(f"Token not imported: {exc}") from None
+    print(
+        f"Twitch session imported for user {result['user_id']} "
+        f"({result['client']}, {result['campaign_count']} campaigns visible)."
+    )
+    return 0
+
+
 def serve(host: str, port: int, no_auto_start: bool) -> int:
     auth_path = Path(WORKING_DIR, "web-auth.sqlite3")
     if not AuthStore(auth_path).is_provisioned():
@@ -73,11 +87,14 @@ def main(argv: list[str] | None = None) -> int:
     serve_parser.add_argument("--no-auto-start", action="store_true")
     sub.add_parser("provision")
     sub.add_parser("reset-password")
+    sub.add_parser("import-twitch-token")
     args = parser.parse_args(argv)
     if args.command == "provision":
         return provision()
     if args.command == "reset-password":
         return reset_password()
+    if args.command == "import-twitch-token":
+        return import_twitch_session()
     return serve(args.host, args.port, args.no_auto_start)
 
 

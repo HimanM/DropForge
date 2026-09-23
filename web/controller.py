@@ -13,7 +13,7 @@ from core.exceptions import CaptchaRequired
 from core.settings import Settings
 from core.translate import _
 from core.utils import ExponentialBackoff, lock_file
-from network.twitch import Twitch
+from network.twitch import Twitch, import_auth_token
 from web.discord import DiscordNotifier
 from web.manager import WebManager
 
@@ -74,6 +74,16 @@ class MinerController:
             return True
         COOKIES_PATH.unlink(missing_ok=True)
         return await self.start()
+
+    async def import_twitch_token(self, token: str) -> dict[str, Any]:
+        was_running = self.running
+        if was_running:
+            await self.stop(notify=False)
+        try:
+            return await import_auth_token(token)
+        finally:
+            if was_running:
+                await self.start()
 
     async def _run(self) -> None:
         backoff = ExponentialBackoff(variance=0, maximum=60)

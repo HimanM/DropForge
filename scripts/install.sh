@@ -207,6 +207,9 @@ if [ "$os" = "Linux" ]; then
   if [ -d "$INSTALL_DIR/cache" ] && [ ! -d "$DATA_DIR/cache" ]; then
     mv "$INSTALL_DIR/cache" "$DATA_DIR/cache"
   fi
+  if [ -f "$DATA_DIR/cookies.jar" ]; then
+    cp -p "$DATA_DIR/cookies.jar" "$DATA_DIR/cookies.jar.pre-update"
+  fi
 
   mv "$extracted" "$release_dir"
   python3 -m venv "$release_dir/venv"
@@ -341,6 +344,27 @@ EOF
 #!/usr/bin/env sh
 set -eu
 case "\${1:-status}" in
+  import-twitch-token)
+    was_active="\$(systemctl is-active "$SERVICE_NAME.service" 2>/dev/null || true)"
+    if [ "\$(id -u)" -eq 0 ]; then
+      systemctl stop "$SERVICE_NAME.service"
+    else
+      sudo systemctl stop "$SERVICE_NAME.service"
+    fi
+    export TDMINER_DATA_DIR="$DATA_DIR"
+    set +e
+    "$APP_DIR/current/venv/bin/python" "$APP_DIR/current/tdminer_web.py" import-twitch-token
+    result=\$?
+    set -e
+    if [ "\$was_active" = "active" ]; then
+      if [ "\$(id -u)" -eq 0 ]; then
+        systemctl start "$SERVICE_NAME.service"
+      else
+        sudo systemctl start "$SERVICE_NAME.service"
+      fi
+    fi
+    exit "\$result"
+    ;;
   reset-password)
     export TDMINER_DATA_DIR="$DATA_DIR"
     exec "$APP_DIR/current/venv/bin/python" "$APP_DIR/current/tdminer_web.py" reset-password
@@ -358,7 +382,7 @@ case "\${1:-status}" in
     exec sudo journalctl -u "$SERVICE_NAME.service" -f
     ;;
   *)
-    echo "Usage: tdminer-web {status|start|stop|restart|logs|reset-password}" >&2
+    echo "Usage: tdminer-web {status|start|stop|restart|logs|reset-password|import-twitch-token}" >&2
     exit 2
     ;;
 esac

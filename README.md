@@ -15,6 +15,7 @@ The miner advances Twitch drop progress without playing video. It logs in to Twi
 - DropForge terminal UI through `tdminer`.
 - Portable CLI mode for headless Linux, SSH sessions, Termux source installs, and terminals where full TUIs are awkward.
 - Twitch device-code login for terminal sessions.
+- Secure import of an existing Twitch browser `auth-token`.
 - Saved login through `cookies.jar`.
 - Campaign discovery and drop progress tracking.
 - Game priority and exclusion lists.
@@ -71,9 +72,16 @@ tdminer-web stop
 tdminer-web restart
 tdminer-web logs
 tdminer-web reset-password
+tdminer-web import-twitch-token
 ```
 
 Stopping `tdminer-web` stops both the Web UI and mining. Starting it again resumes the saved installation and Twitch session.
+
+### Import an existing Twitch login
+
+The Web UI and Windows GUI offer **Log in with Twitch** and **Import auth token**. To import a browser session, open your browser's developer tools, find Cookies for `https://www.twitch.tv`, and copy only the value named `auth-token`. Treat it like a password.
+
+For Linux CLI/server installs, use `tdminer --import-token` or `tdminer-web import-twitch-token`. DropForge validates both the token and drops-campaign access before replacing the saved token, and keeps a `cookies.jar.backup` copy. One token can be copied to multiple installations, but only run one miner for that Twitch account at a time. Logging out of Twitch or revoking the session invalidates every copy.
 
 To uninstall the default Web UI installation while keeping `~/.local/share/tdminer/data` for a later reinstall:
 

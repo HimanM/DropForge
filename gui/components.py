@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from tkinter.font import Font, nametofont
 from functools import partial, cached_property
 from datetime import datetime, timedelta, timezone
-from tkinter import Tk, ttk, StringVar, DoubleVar, IntVar
+from tkinter import Tk, ttk, StringVar, DoubleVar, IntVar, simpledialog, messagebox
 from typing import Any, Union, Tuple, TypedDict, NoReturn, Generic, TYPE_CHECKING
 from yarl import URL
 from PIL.ImageTk import PhotoImage
@@ -543,11 +543,59 @@ class LoginForm:
         # self._token_entry.grid(column=0, row=3, columnspan=2)
 
         self._confirm = asyncio.Event()
+        self._auth_choice = asyncio.Event()
+        self._imported_token = ""
+        buttons = ttk.Frame(frame)
+        buttons.grid(column=0, row=4, columnspan=2, sticky="ew")
+        buttons.columnconfigure((0, 1), weight=1)
         self._button = ttk.Button(
-            frame, text=_("gui", "login", "button"), command=self._confirm.set, state="disabled"
+            buttons,
+            text="Log in with Twitch",
+            command=self._choose_device_login,
+            state="disabled",
         )
-        self._button.grid(column=0, row=4, columnspan=2)
+        self._button.grid(column=0, row=0, sticky="ew")
+        self._import_button = ttk.Button(
+            buttons, text="Import auth token", command=self._choose_import, state="disabled"
+        )
+        self._import_button.grid(column=1, row=0, sticky="ew", padx=(4, 0))
         self.update(_("gui", "login", "logged_out"), None)
+
+    def _choose_device_login(self) -> None:
+        self._imported_token = ""
+        self._auth_choice.set()
+
+    def _choose_import(self) -> None:
+        token = simpledialog.askstring(
+            "Import Twitch session",
+            "Paste only the value of the auth-token cookie:",
+            show="•",
+            parent=self._manager._root,
+        )
+        if token and token.strip():
+            self._imported_token = token.strip()
+            self._auth_choice.set()
+
+    def report_import_error(self, message: str) -> None:
+        messagebox.showerror(
+            "Import Twitch session",
+            message,
+            parent=self._manager._root,
+        )
+
+    async def ask_auth_token(self) -> str:
+        self.update(_("gui", "login", "required"), None)
+        self._manager.grab_attention(sound=False)
+        self._auth_choice.clear()
+        self._button.config(state="normal")
+        self._import_button.config(state="normal")
+        try:
+            await self._manager.coro_unless_closed(self._auth_choice.wait())
+            return self._imported_token
+        finally:
+            self._imported_token = ""
+            self._button.config(state="disabled")
+            self._import_button.config(state="disabled")
 
     def clear(self, login: bool = False, password: bool = False, token: bool = False):
         clear_all = not login and not password and not token
@@ -561,10 +609,10 @@ class LoginForm:
     async def wait_for_login_press(self) -> None:
         self._confirm.clear()
         try:
-            self._button.config(state="normal")
+            self._button.config(state="normal", command=self._confirm.set)
             await self._manager.coro_unless_closed(self._confirm.wait())
         finally:
-            self._button.config(state="disabled")
+            self._button.config(state="disabled", command=self._choose_device_login)
 
     async def ask_login(self) -> LoginData:
         self.update(_("gui", "login", "required"), None)

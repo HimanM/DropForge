@@ -228,6 +228,21 @@ def create_app(auth_path: Path, static_path: Path, *, auto_start: bool = True) -
         stopped = await request.app["controller"].stop()
         return web.json_response({"stopped": stopped})
 
+    async def import_twitch_token(request: web.Request) -> web.Response:
+        session = await _session(request, csrf=True)
+        if isinstance(session, web.Response):
+            return session
+        token = (await _body(request)).get("token")
+        if not isinstance(token, str):
+            return _json_error("A Twitch auth token is required.", 400)
+        try:
+            result = await request.app["controller"].import_twitch_token(token)
+        except ValueError as exc:
+            return _json_error(str(exc), 400)
+        except Exception:
+            return _json_error("Twitch token validation failed. The saved session was not changed.", 502)
+        return web.json_response({"ok": True, **result})
+
     async def miner_action(request: web.Request) -> web.Response:
         session = await _session(request, csrf=True)
         if isinstance(session, web.Response):
@@ -359,6 +374,7 @@ def create_app(auth_path: Path, static_path: Path, *, auto_start: bool = True) -
     app.router.add_get("/api/state", state)
     app.router.add_post("/api/miner/start", miner_start)
     app.router.add_post("/api/miner/stop", miner_stop)
+    app.router.add_post("/api/twitch/import-token", import_twitch_token)
     app.router.add_post("/api/miner/{action}", miner_action)
     app.router.add_post("/api/channels/select", select_channel)
     app.router.add_put("/api/settings", update_settings)
