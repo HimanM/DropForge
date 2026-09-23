@@ -81,6 +81,7 @@ class TwitchIntegrityTests(unittest.IsolatedAsyncioTestCase):
                 return Context(object())
 
         process = SimpleNamespace(
+            pid=123,
             poll=Mock(return_value=None),
             terminate=Mock(),
             wait=Mock(return_value=0),
@@ -101,6 +102,7 @@ class TwitchIntegrityTests(unittest.IsolatedAsyncioTestCase):
             patch("network.integrity.aiohttp.ClientSession", return_value=Session()),
             patch("network.integrity._call", browser_call),
             patch("network.integrity.asyncio.sleep", new=AsyncMock()),
+            patch("network.integrity.os.killpg"),
         ):
             proof, expiration = await acquire_integrity_token(
                 {"Authorization": "OAuth secret", "Client-ID": "client"}, "device"
