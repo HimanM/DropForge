@@ -52,7 +52,7 @@ class TwitchAuthTests(unittest.TestCase):
 
 
 class TwitchIntegrityTests(unittest.IsolatedAsyncioTestCase):
-    async def test_browser_receives_auth_cookie_before_loading_twitch(self):
+    async def test_browser_receives_matching_identity_before_loading_twitch(self):
         class Context:
             def __init__(self, value):
                 self.value = value
@@ -90,6 +90,7 @@ class TwitchIntegrityTests(unittest.IsolatedAsyncioTestCase):
             side_effect=[
                 {},
                 {},
+                {},
                 {"success": True},
                 {},
                 {},
@@ -105,14 +106,19 @@ class TwitchIntegrityTests(unittest.IsolatedAsyncioTestCase):
             patch("network.integrity.os.killpg", create=True),
         ):
             proof, expiration = await acquire_integrity_token(
-                {"Authorization": "OAuth secret", "Client-ID": "client"}, "device"
+                {"Authorization": "OAuth secret", "Client-ID": "client"},
+                "device",
+                ClientType.WEB.USER_AGENT,
             )
 
         self.assertEqual((proof, expiration), ("proof", 1890000000))
-        cookie = browser_call.await_args_list[2].args[3]
+        user_agent = browser_call.await_args_list[2]
+        self.assertEqual(user_agent.args[2], "Network.setUserAgentOverride")
+        self.assertEqual(user_agent.args[3]["userAgent"], ClientType.WEB.USER_AGENT)
+        cookie = browser_call.await_args_list[3].args[3]
         self.assertEqual(cookie["name"], "auth-token")
         self.assertEqual(cookie["value"], "secret")
-        self.assertEqual(browser_call.await_args_list[4].args[2], "Page.navigate")
+        self.assertEqual(browser_call.await_args_list[5].args[2], "Page.navigate")
 
 
 class TwitchTokenImportAsyncTests(unittest.IsolatedAsyncioTestCase):

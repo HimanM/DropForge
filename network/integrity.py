@@ -55,7 +55,9 @@ async def _call(ws: aiohttp.ClientWebSocketResponse, request_id: int, method: st
             return message.get("result", {})
 
 
-async def acquire_integrity_token(headers: dict[str, str], device_id: str) -> tuple[str, float]:
+async def acquire_integrity_token(
+    headers: dict[str, str], device_id: str, user_agent: str
+) -> tuple[str, float]:
     """Run Twitch's KPSDK in a disposable browser profile and return its signed proof."""
     browser = _browser()
     with socket.socket() as listener:
@@ -119,9 +121,15 @@ async def acquire_integrity_token(headers: dict[str, str], device_id: str) -> tu
                         raise RuntimeError("A Twitch auth token is required for browser integrity.")
                     await _call(ws, 1, "Runtime.enable")
                     await _call(ws, 2, "Network.enable")
-                    cookie = await _call(
+                    await _call(
                         ws,
                         3,
+                        "Network.setUserAgentOverride",
+                        {"userAgent": user_agent, "acceptLanguage": "en-US", "platform": "Win32"},
+                    )
+                    cookie = await _call(
+                        ws,
+                        4,
                         "Network.setCookie",
                         {
                             "name": "auth-token",
@@ -133,8 +141,8 @@ async def acquire_integrity_token(headers: dict[str, str], device_id: str) -> tu
                     )
                     if not cookie.get("success"):
                         raise RuntimeError("Could not load the Twitch session into the temporary browser.")
-                    await _call(ws, 4, "Page.enable")
-                    await _call(ws, 5, "Page.navigate", {"url": "https://www.twitch.tv"})
+                    await _call(ws, 5, "Page.enable")
+                    await _call(ws, 6, "Page.navigate", {"url": "https://www.twitch.tv"})
                     await asyncio.sleep(5)
                     expression = f"""new Promise((resolve,reject)=>{{
 function configure(){{window.KPSDK.configure([{{protocol:'https:',method:'POST',domain:'gql.twitch.tv',path:'/integrity'}}])}}
@@ -143,7 +151,7 @@ document.addEventListener('kpsdk-load',configure,{{once:true}});document.addEven
 }})"""
                     result = await _call(
                         ws,
-                        6,
+                        7,
                         "Runtime.evaluate",
                         {"expression": expression, "awaitPromise": True, "returnByValue": True, "timeout": 30000},
                     )

@@ -118,6 +118,7 @@ async def validate_auth_token(token: str) -> tuple[Any, int, int]:
                 integrity_token, _ = await acquire_integrity_token(
                     {"Client-ID": client.CLIENT_ID, "Authorization": f"OAuth {token}"},
                     headers["X-Device-Id"],
+                    client.USER_AGENT,
                 )
             except RuntimeError as exc:
                 raise ValueError(str(exc)) from None
@@ -537,6 +538,7 @@ class _AuthState:
                         "Authorization": f"OAuth {self.access_token}",
                     },
                     self.device_id,
+                    ClientType.WEB.USER_AGENT,
                 )
                 logger.debug("Acquired Twitch Client-Integrity token")
                 return self.integrity_token
