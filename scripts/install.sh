@@ -164,6 +164,27 @@ if [ "$os" = "Linux" ]; then
   }
 
   install_campaign_browser() {
+    os_id=""
+    if [ -r /etc/os-release ]; then
+      os_id="$(. /etc/os-release; printf '%s' "${ID:-}")"
+    fi
+    if command -v apt-get >/dev/null 2>&1 \
+      && [ "$os_id" = "ubuntu" ] \
+      && [ "$(dpkg --print-architecture)" = "amd64" ]; then
+      if command -v google-chrome-stable >/dev/null 2>&1 \
+        && command -v xvfb-run >/dev/null 2>&1; then
+        return
+      fi
+      echo "Installing native Chrome and Xvfb for Twitch campaign discovery."
+      chrome_deb="$(mktemp)"
+      curl -fL https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+        -o "$chrome_deb"
+      as_root apt-get update
+      as_root apt-get install -y xvfb "$chrome_deb"
+      rm -f "$chrome_deb"
+      return
+    fi
+
     browser=""
     for candidate in google-chrome-stable google-chrome chromium chromium-browser; do
       if command -v "$candidate" >/dev/null 2>&1; then

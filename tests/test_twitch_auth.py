@@ -11,6 +11,7 @@ from yarl import URL
 
 from core.constants import ClientType
 from core.exceptions import GQLException, LoginException
+from network.integrity import acquire_integrity_token
 from network.twitch import Twitch, _AuthState, import_auth_token, validate_auth_token
 
 
@@ -48,6 +49,68 @@ class TwitchAuthTests(unittest.TestCase):
 
         with self.assertRaisesRegex(LoginException, "invalid client"):
             asyncio.run(auth._oauth_login())
+
+
+class TwitchIntegrityTests(unittest.IsolatedAsyncioTestCase):
+    async def test_browser_receives_auth_cookie_before_loading_twitch(self):
+        class Context:
+            def __init__(self, value):
+                self.value = value
+
+            async def __aenter__(self):
+                return self.value
+
+            async def __aexit__(self, *_args):
+                return False
+
+        class Response:
+            async def json(self):
+                return {"webSocketDebuggerUrl": "ws://browser"}
+
+        class Session:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+            def put(self, *_args, **_kwargs):
+                return Context(Response())
+
+            def ws_connect(self, *_args, **_kwargs):
+                return Context(object())
+
+        process = SimpleNamespace(
+            poll=Mock(return_value=None),
+            terminate=Mock(),
+            wait=Mock(return_value=0),
+        )
+        browser_call = AsyncMock(
+            side_effect=[
+                {},
+                {},
+                {"success": True},
+                {},
+                {},
+                {"result": {"value": {"token": "proof", "expiration": 1890000000000}}},
+            ]
+        )
+        with (
+            patch("network.integrity._browser", return_value="browser"),
+            patch("network.integrity.subprocess.Popen", return_value=process),
+            patch("network.integrity.aiohttp.ClientSession", return_value=Session()),
+            patch("network.integrity._call", browser_call),
+            patch("network.integrity.asyncio.sleep", new=AsyncMock()),
+        ):
+            proof, expiration = await acquire_integrity_token(
+                {"Authorization": "OAuth secret", "Client-ID": "client"}, "device"
+            )
+
+        self.assertEqual((proof, expiration), ("proof", 1890000000))
+        cookie = browser_call.await_args_list[2].args[3]
+        self.assertEqual(cookie["name"], "auth-token")
+        self.assertEqual(cookie["value"], "secret")
+        self.assertEqual(browser_call.await_args_list[4].args[2], "Page.navigate")
 
 
 class TwitchTokenImportAsyncTests(unittest.IsolatedAsyncioTestCase):

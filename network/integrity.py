@@ -66,6 +66,7 @@ async def acquire_integrity_token(headers: dict[str, str], device_id: str) -> tu
         command = [
             browser,
             "--disable-gpu",
+            "--disable-dev-shm-usage",
             "--disable-blink-features=AutomationControlled",
             "--disable-extensions",
             "--disable-sync",
@@ -102,7 +103,7 @@ async def acquire_integrity_token(headers: dict[str, str], device_id: str) -> tu
                         raise RuntimeError("The browser exited before Twitch integrity could start.")
                     try:
                         async with session.put(
-                            f"http://127.0.0.1:{port}/json/new?{quote('https://www.twitch.tv', safe='')}"
+                            f"http://127.0.0.1:{port}/json/new?{quote('about:blank', safe='')}"
                         ) as response:
                             target = await response.json()
                         break
@@ -112,7 +113,28 @@ async def acquire_integrity_token(headers: dict[str, str], device_id: str) -> tu
                     raise RuntimeError("Could not connect to the temporary browser.")
 
                 async with session.ws_connect(target["webSocketDebuggerUrl"]) as ws:
+                    authorization = headers.get("Authorization", "")
+                    auth_token = authorization.removeprefix("OAuth ").strip()
+                    if not auth_token:
+                        raise RuntimeError("A Twitch auth token is required for browser integrity.")
                     await _call(ws, 1, "Runtime.enable")
+                    await _call(ws, 2, "Network.enable")
+                    cookie = await _call(
+                        ws,
+                        3,
+                        "Network.setCookie",
+                        {
+                            "name": "auth-token",
+                            "value": auth_token,
+                            "domain": ".twitch.tv",
+                            "path": "/",
+                            "secure": True,
+                        },
+                    )
+                    if not cookie.get("success"):
+                        raise RuntimeError("Could not load the Twitch session into the temporary browser.")
+                    await _call(ws, 4, "Page.enable")
+                    await _call(ws, 5, "Page.navigate", {"url": "https://www.twitch.tv"})
                     await asyncio.sleep(5)
                     expression = f"""new Promise((resolve,reject)=>{{
 function configure(){{window.KPSDK.configure([{{protocol:'https:',method:'POST',domain:'gql.twitch.tv',path:'/integrity'}}])}}
@@ -121,7 +143,7 @@ document.addEventListener('kpsdk-load',configure,{{once:true}});document.addEven
 }})"""
                     result = await _call(
                         ws,
-                        2,
+                        6,
                         "Runtime.evaluate",
                         {"expression": expression, "awaitPromise": True, "returnByValue": True, "timeout": 30000},
                     )
