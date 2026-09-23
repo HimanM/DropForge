@@ -57,6 +57,7 @@ jobs:
         run: |
           python3 -m unittest discover -s tests -p "test_frontend_injection.py" -v
           python3 -m unittest discover -s tests -p "test_tui*.py" -v
+          python3 -m unittest discover -s tests -p "test_badge_farming.py" -v
 
       - name: Compile TUI modules
         run: |

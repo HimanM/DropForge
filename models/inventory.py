@@ -225,6 +225,8 @@ class TimedDrop(BaseDrop):
         )
         self.required_minutes: int = data["requiredMinutesWatched"]
         self.extra_current_minutes: int = 0
+        if self.is_free_badge and self.id in self._twitch.settings.completed_badges:
+            self.is_claimed = True
         if self.is_claimed:
             # claimed drops may report inconsistent current minutes, so we need to overwrite them
             self.real_current_minutes = self.required_minutes
@@ -245,6 +247,14 @@ class TimedDrop(BaseDrop):
     @property
     def current_minutes(self) -> int:
         return self.real_current_minutes + self.extra_current_minutes
+
+    @property
+    def is_free_badge(self) -> bool:
+        return (
+            self.required_minutes > 0
+            and bool(self.benefits)
+            and all(benefit.type is BenefitType.BADGE for benefit in self.benefits)
+        )
 
     @property
     def remaining_minutes(self) -> int:
@@ -289,6 +299,7 @@ class TimedDrop(BaseDrop):
         return (
             super()._base_earn_conditions()
             and self.required_minutes > 0
+            and (not self._twitch.badge_farming or self.is_free_badge)
             # NOTE: This may be a bad idea, as it invalidates the can_earn status
             # and provides no way to recover from this state until the next reload.
             and self.extra_current_minutes < MAX_EXTRA_MINUTES
@@ -305,11 +316,17 @@ class TimedDrop(BaseDrop):
         else:
             self.real_current_minutes = self.required_minutes
         self.extra_current_minutes = 0
+        if self.is_free_badge and self.real_current_minutes >= self.required_minutes:
+            self._twitch.mark_badge_complete(self)
         self._on_state_changed()
 
     def _bump_minutes(self, channel: Channel | None) -> bool:
         if self.can_earn(channel):
             self.extra_current_minutes += 1
+            if self.is_free_badge and self.current_minutes >= self.required_minutes:
+                self._twitch.mark_badge_complete(self)
+                self._on_state_changed()
+                return False
             self._on_state_changed()
             if self.extra_current_minutes >= MAX_EXTRA_MINUTES:
                 return True
@@ -395,6 +412,8 @@ class DropsCampaign:
 
     @property
     def eligible(self) -> bool:
+        if self._twitch.badge_farming:
+            return self.has_free_badge
         if self.has_badge_or_emote:
             return self._twitch.settings.enable_badges_emotes
         if self.linked:
@@ -410,6 +429,10 @@ class DropsCampaign:
         return any(
             benefit.type.is_badge_or_emote() for drop in self.drops for benefit in drop.benefits
         )
+
+    @cached_property
+    def has_free_badge(self) -> bool:
+        return any(drop.is_free_badge for drop in self.drops)
 
     @property
     def finished(self) -> bool:

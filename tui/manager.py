@@ -387,6 +387,7 @@ class TUIManager:
         )
         self.state.farm_unlinked = bool(getattr(settings, "farm_unlinked", False))
         self.state.enable_badges_emotes = bool(getattr(settings, "enable_badges_emotes", False))
+        self.state.auto_farm_badges = bool(getattr(settings, "auto_farm_badges", False))
         self.state.trust_allowed_channels = bool(
             getattr(settings, "trust_allowed_channels", False)
         )
@@ -397,6 +398,7 @@ class TUIManager:
             f"Exclude: {len(self.state.exclude)} | "
             f"Farm unlinked: {self.state.farm_unlinked} | "
             f"Badges/emotes: {self.state.enable_badges_emotes} | "
+            f"Auto badges: {self.state.auto_farm_badges} | "
             f"Trust allowed: {self.state.trust_allowed_channels} | "
             f"Games: {len(self.state.available_games)}"
         )
@@ -424,6 +426,7 @@ class TUIManager:
             on_set_priority_mode=self._set_priority_mode,
             on_set_farm_unlinked=self._set_farm_unlinked,
             on_set_badges_emotes=self._set_badges_emotes,
+            on_set_auto_farm_badges=self._set_auto_farm_badges,
             on_set_trust_allowed_channels=self._set_trust_allowed_channels,
             on_ready=self._mark_app_ready,
         )
@@ -613,6 +616,10 @@ class TUIManager:
     def _set_badges_emotes(self, enabled: bool) -> None:
         self._twitch.settings.enable_badges_emotes = enabled
         self._save_settings_update(f"Badge/emote drops set to {enabled}.")
+
+    def _set_auto_farm_badges(self, enabled: bool) -> None:
+        self._twitch.settings.auto_farm_badges = enabled
+        self._save_settings_update(f"Idle free-badge farming set to {enabled}.")
 
     def _set_trust_allowed_channels(self, enabled: bool) -> None:
         self._twitch.settings.trust_allowed_channels = enabled

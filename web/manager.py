@@ -70,6 +70,10 @@ class WebManager(TUIManager):
         if self.notifier is not None:
             self.notifier.finish_inventory()
 
+    def badge_farming_started(self, games: list[Any]) -> None:
+        if self.notifier is not None:
+            self.notifier.badge_farming_started(self, games)
+
     def print(self, message: str) -> None:
         super().print(message)
         if self.notifier is not None and message == _("status", "no_channel"):
@@ -108,6 +112,8 @@ class WebManager(TUIManager):
             self._set_farm_unlinked(payload["farm_unlinked"])
         if "enable_badges_emotes" in payload:
             self._set_badges_emotes(payload["enable_badges_emotes"])
+        if "auto_farm_badges" in payload:
+            self._set_auto_farm_badges(payload["auto_farm_badges"])
         settings = self._twitch.settings
         restart_keys = {"proxy", "language", "connection_quality"}
         channel_keys = {"available_drops_check", "trust_allowed_channels"}
@@ -174,6 +180,7 @@ class WebManager(TUIManager):
                 "priority_modes": list(self.PRIORITY_MODE_LABELS.values()),
                 "farm_unlinked": self.state.farm_unlinked,
                 "enable_badges_emotes": self.state.enable_badges_emotes,
+                "auto_farm_badges": self.state.auto_farm_badges,
                 "available_drops_check": bool(self._twitch.settings.available_drops_check),
                 "trust_allowed_channels": bool(
                     getattr(self._twitch.settings, "trust_allowed_channels", False)

@@ -1564,6 +1564,7 @@ class _SettingsVars(TypedDict):
     priority_mode: StringVar
     tray_notifications: IntVar
     enable_badges_emotes: IntVar
+    auto_farm_badges: IntVar
     available_drops_check: IntVar
     trust_allowed_channels: IntVar
     farm_unlinked: IntVar
@@ -1602,6 +1603,9 @@ class SettingsPanel:
             "tray_notifications": IntVar(master, self._settings.tray_notifications),
             "enable_badges_emotes": IntVar(
                 master, int(self._settings.enable_badges_emotes)
+            ),
+            "auto_farm_badges": IntVar(
+                master, int(self._settings.auto_farm_badges)
             ),
             "available_drops_check": IntVar(
                 master, int(self._settings.available_drops_check)
@@ -1734,6 +1738,18 @@ class SettingsPanel:
                 self._settings,
                 "enable_badges_emotes",
                 bool(self._vars["enable_badges_emotes"].get()),
+            ),
+        ).grid(column=1, row=irow, sticky="w")
+        ttk.Label(
+            advanced_center, text=_("gui", "settings", "advanced", "auto_farm_badges")
+        ).grid(column=0, row=(irow := irow + 1), sticky="e")
+        ttk.Checkbutton(
+            advanced_center,
+            variable=self._vars["auto_farm_badges"],
+            command=lambda: setattr(
+                self._settings,
+                "auto_farm_badges",
+                bool(self._vars["auto_farm_badges"].get()),
             ),
         ).grid(column=1, row=irow, sticky="w")
         ttk.Label(
@@ -2853,6 +2869,8 @@ if __name__ == "__main__":
                 exclude={"Lit Game"},
                 tray_notifications=True,
                 enable_badges_emotes=False,
+                auto_farm_badges=False,
+                completed_badges=set(),
                 available_drops_check=False,
                 trust_allowed_channels=False,
                 farm_unlinked=False,

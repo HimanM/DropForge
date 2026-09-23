@@ -220,6 +220,29 @@ class DiscordNotifier:
             image=_image(campaign.image_url) if campaign else None,
         ))
 
+    def badge_farming_started(self, manager: WebManager, games: list[Any]) -> None:
+        priority = set(manager._twitch.settings.priority)
+        categories = tuple(game.name for game in games if game.name in priority)
+        if not categories or not self._enabled("status"):
+            return
+        key = f"discord:badge-fallback:{'|'.join(categories)}"
+        if not self.store.claim_notification_event(key, cooldown=60 * 60):
+            return
+        campaign = next(
+            (
+                item for item in manager.inv.campaigns.values()
+                if item.game.name in categories and item.has_free_badge
+            ),
+            None,
+        )
+        self._schedule(self._status_payload(
+            "Free badge fallback active",
+            "Priority mining is idle, so DropForge is farming eligible watch-time badges.",
+            categories,
+            _ORANGE,
+            image=_image(campaign.image_url) if campaign else None,
+        ))
+
     def miner_stopped(self, manager: WebManager) -> None:
         drop = manager.progress._drop
         game = drop.campaign.game.name if drop is not None else ""
@@ -359,7 +382,7 @@ class DiscordNotifier:
         reward = ", ".join(benefit.name for benefit in drop.benefits) or drop.name
         thumbnail = next((_image(benefit.image_url) for benefit in drop.benefits if _image(benefit.image_url)), None)
         return self._payload([self._embed(
-            "Drop claimed",
+            "Free badge earned" if drop.is_free_badge else "Drop claimed",
             reward,
             _GREEN,
             fields=[
