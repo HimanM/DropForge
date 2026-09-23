@@ -1948,8 +1948,8 @@ class SettingsPanel:
             reload_frame,
             text="Invalidate auth",
             command=lambda: (
-                self._manager._twitch.invalidate(),
-                self._manager._twitch.state_change(State.RESTART),
+                self._manager._twitch._auth_state.invalidate(delete_cookies=True),
+                self._manager._twitch.change_state(State.RESTART),
             ),
         ).grid(column=2, row=0, padx=(4, 0))
 
