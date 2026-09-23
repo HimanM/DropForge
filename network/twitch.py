@@ -141,6 +141,17 @@ class _AuthState:
                     #     "verification_uri": "https://www.twitch.tv/activate?device-code=ABCDEFGH"
                     # }
                     response_json: JsonType = await response.json()
+                    required_fields = (
+                        "device_code", "user_code", "interval", "verification_uri", "expires_in"
+                    )
+                    if response.status != 200 or not all(
+                        field in response_json for field in required_fields
+                    ):
+                        reason = response_json.get("message") or response_json.get("error")
+                        raise LoginException(
+                            f"Twitch device login failed (HTTP {response.status}): "
+                            f"{reason or 'unexpected response'}"
+                        )
                     device_code: str = response_json["device_code"]
                     user_code: str = response_json["user_code"]
                     interval: int = response_json["interval"]
@@ -451,7 +462,7 @@ class Twitch:
         # Do not modify the default, safe values.
         self._qgl_limiter = RateLimiter(capacity=5, window=1)
         # Client type, session and auth
-        self._client_type: ClientInfo = ClientType.ANDROID_APP
+        self._client_type: ClientInfo = ClientType.MOBILE_WEB
         self._session: aiohttp.ClientSession | None = None
         self._auth_state: _AuthState = _AuthState(self)
         # Frontend manager. The default remains the Tk GUI, but CLI/TUI entry points can inject
