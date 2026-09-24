@@ -94,7 +94,15 @@ class TwitchIntegrityTests(unittest.IsolatedAsyncioTestCase):
                 {"success": True},
                 {},
                 {},
-                {"result": {"value": {"token": "proof", "expiration": 1890000000000}}},
+                {
+                    "result": {
+                        "value": {
+                            "token": "proof",
+                            "expiration": 1890000000000,
+                            "probe": {"status": 200, "errors": []},
+                        }
+                    }
+                },
             ]
         )
         with (
@@ -109,6 +117,7 @@ class TwitchIntegrityTests(unittest.IsolatedAsyncioTestCase):
                 {"Authorization": "OAuth secret", "Client-ID": "client"},
                 "device",
                 ClientType.WEB.USER_AGENT,
+                {"operationName": "ViewerDropsDashboard"},
             )
 
         self.assertEqual((proof, expiration), ("proof", 1890000000))
@@ -119,6 +128,9 @@ class TwitchIntegrityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cookie["name"], "auth-token")
         self.assertEqual(cookie["value"], "secret")
         self.assertEqual(browser_call.await_args_list[5].args[2], "Page.navigate")
+        expression = browser_call.await_args_list[6].args[3]["expression"]
+        self.assertIn("ViewerDropsDashboard", expression)
+        self.assertIn("Client-Integrity", expression)
 
 
 class TwitchTokenImportAsyncTests(unittest.IsolatedAsyncioTestCase):

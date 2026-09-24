@@ -116,9 +116,14 @@ async def validate_auth_token(token: str) -> tuple[Any, int, int]:
         if client is ClientType.WEB:
             try:
                 integrity_token, _ = await acquire_integrity_token(
-                    {"Client-ID": client.CLIENT_ID, "Authorization": f"OAuth {token}"},
+                    {
+                        "Client-ID": client.CLIENT_ID,
+                        "Authorization": f"OAuth {token}",
+                        "Client-Session-Id": headers["Client-Session-Id"],
+                    },
                     headers["X-Device-Id"],
                     client.USER_AGENT,
+                    GQL_QUERIES["Campaigns"],
                 )
             except RuntimeError as exc:
                 raise ValueError(str(exc)) from None
@@ -142,7 +147,10 @@ async def validate_auth_token(token: str) -> tuple[Any, int, int]:
             or error.get("extensions", {}).get("code") == "IntegrityCheckFailed"
             for error in payload.get("errors", [])
         ):
-            raise ValueError("Twitch rejected the browser integrity proof. Try importing the token again.")
+            raise ValueError(
+                "The integrity proof passed inside Chrome, but Twitch rejected DropForge's "
+                "follow-up request. This points to a request fingerprint mismatch."
+            )
         current_user = (payload.get("data") or {}).get("currentUser")
         if not isinstance(current_user, dict):
             raise ValueError("This Twitch token cannot read the drops campaign list.")
@@ -536,6 +544,7 @@ class _AuthState:
                     {
                         "Client-ID": ClientType.WEB.CLIENT_ID,
                         "Authorization": f"OAuth {self.access_token}",
+                        "Client-Session-Id": self.session_id,
                     },
                     self.device_id,
                     ClientType.WEB.USER_AGENT,

@@ -56,7 +56,7 @@ async def _call(ws: aiohttp.ClientWebSocketResponse, request_id: int, method: st
 
 
 async def acquire_integrity_token(
-    headers: dict[str, str], device_id: str, user_agent: str
+    headers: dict[str, str], device_id: str, user_agent: str, probe: dict | None = None
 ) -> tuple[str, float]:
     """Run Twitch's KPSDK in a disposable browser profile and return its signed proof."""
     browser = _browser()
@@ -146,7 +146,7 @@ async def acquire_integrity_token(
                     await asyncio.sleep(5)
                     expression = f"""new Promise((resolve,reject)=>{{
 function configure(){{window.KPSDK.configure([{{protocol:'https:',method:'POST',domain:'gql.twitch.tv',path:'/integrity'}}])}}
-async function fetchIntegrity(){{const response=await window.fetch('https://gql.twitch.tv/integrity',{{headers:Object.assign({json.dumps(headers)},{{'x-device-id':{json.dumps(device_id)}}}),body:null,method:'POST',mode:'cors',credentials:'omit'}});if(response.status!==200)throw new Error(`Twitch integrity HTTP ${{response.status}}`);return await response.json()}}
+async function fetchIntegrity(){{const requestHeaders=Object.assign({json.dumps(headers)},{{'x-device-id':{json.dumps(device_id)}}});const response=await window.fetch('https://gql.twitch.tv/integrity',{{headers:requestHeaders,body:null,method:'POST',mode:'cors',credentials:'omit'}});if(response.status!==200)throw new Error(`Twitch integrity HTTP ${{response.status}}`);const proof=await response.json();const probe={json.dumps(probe)};if(probe!==null){{const gql=await window.fetch('https://gql.twitch.tv/gql',{{headers:Object.assign({{}},requestHeaders,{{'Client-Integrity':proof.token}}),body:JSON.stringify(probe),method:'POST',mode:'cors',credentials:'omit'}});const body=await gql.json();proof.probe={{status:gql.status,errors:(body.errors||[]).map(error=>({{message:error.message||'',code:(error.extensions||{{}}).code||''}}))}}}}return proof}}
 document.addEventListener('kpsdk-load',configure,{{once:true}});document.addEventListener('kpsdk-ready',()=>fetchIntegrity().then(resolve,reject),{{once:true}});const script=document.createElement('script');script.addEventListener('error',reject);script.src={json.dumps(KPSDK_SCRIPT)};document.body.appendChild(script)
 }})"""
                     result = await _call(
@@ -160,6 +160,23 @@ document.addEventListener('kpsdk-load',configure,{{once:true}});document.addEven
                     payload = result.get("result", {}).get("value", {})
                     if not isinstance(payload, dict) or not isinstance(payload.get("token"), str):
                         raise RuntimeError("Twitch integrity script returned an invalid response.")
+                    browser_probe = payload.get("probe")
+                    if isinstance(browser_probe, dict) and browser_probe.get("errors"):
+                        errors = browser_probe["errors"]
+                        if any(
+                            error.get("message") == "failed integrity check"
+                            or error.get("code") == "IntegrityCheckFailed"
+                            for error in errors
+                        ):
+                            raise RuntimeError(
+                                "Twitch rejected the integrity proof inside Chrome. This points to "
+                                "VPS network/browser attestation, not the imported auth-token."
+                            )
+                        first = errors[0]
+                        raise RuntimeError(
+                            "Twitch's same-browser campaign probe failed: "
+                            f"{first.get('code') or first.get('message') or 'unknown error'}."
+                        )
                     expiration = float(payload.get("expiration", 0))
                     return payload["token"], expiration / 1000 if expiration > 1e11 else expiration
         finally:
