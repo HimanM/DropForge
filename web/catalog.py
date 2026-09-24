@@ -102,62 +102,100 @@ class WebTwitch(Twitch):
             cached = {}
 
         try:
-            items: list[JsonType] = []
-            list_url = CATALOG_ORIGIN / "api/v1/twitch/campaigns/"
-            for status in ("active", "upcoming"):
-                async with self.request(
-                    "GET",
-                    list_url.with_query(status=status, page_size=500),
-                    headers={"Accept": "application/json"},
-                ) as response:
+            proxy = getattr(self.settings, "proxy", None) or None
+            timeout = aiohttp.ClientTimeout(total=30)
+            async with aiohttp.ClientSession(
+                timeout=timeout, cookie_jar=aiohttp.DummyCookieJar()
+            ) as session:
+                async def fetch_json(url: URL) -> JsonType:
+                    async with session.get(
+                        url,
+                        headers={"Accept": "application/json"},
+                        proxy=proxy,
+                        allow_redirects=False,
+                    ) as response:
+                        body = await response.read()
                     if response.status != 200:
                         raise RuntimeError(f"campaign catalogue HTTP {response.status}")
-                    payload = await response.json()
-                page_items = payload.get("items") if isinstance(payload, dict) else None
-                if not isinstance(page_items, list) or len(page_items) > 500:
-                    raise RuntimeError("campaign catalogue returned an invalid list")
-                items.extend(item for item in page_items if isinstance(item, dict))
+                    if len(body) > 2_000_000:
+                        raise RuntimeError("campaign catalogue response is too large")
+                    payload = json.loads(body)
+                    if not isinstance(payload, dict):
+                        raise RuntimeError("campaign catalogue returned invalid JSON")
+                    return payload
 
-            current: dict[str, JsonType] = {}
-            changed: list[tuple[str, str]] = []
-            for item in items:
-                campaign_id = str(item.get("twitch_id") or "")
-                try:
-                    UUID(campaign_id)
-                except ValueError:
-                    continue
-                if not item.get("is_fully_imported"):
-                    continue
-                updated_at = str(item.get("updated_at") or "")
-                cached_item = cached.get(campaign_id)
-                if isinstance(cached_item, dict) and isinstance(cached_item.get("detail"), dict):
-                    current[campaign_id] = cached_item
-                    if cached_item.get("updated_at") == updated_at:
+                items: list[JsonType] = []
+                list_url = CATALOG_ORIGIN / "api/v1/twitch/campaigns/"
+                for status in ("active", "upcoming"):
+                    page = 1
+                    while True:
+                        payload = await fetch_json(
+                            list_url.with_query(
+                                status=status, page=page, page_size=10
+                            )
+                        )
+                        page_items = payload.get("items")
+                        total = payload.get("total")
+                        if (
+                            not isinstance(page_items, list)
+                            or len(page_items) > 10
+                            or not isinstance(total, int)
+                            or not 0 <= total <= 2_000
+                        ):
+                            raise RuntimeError("campaign catalogue returned an invalid list")
+                        items.extend(
+                            item for item in page_items if isinstance(item, dict)
+                        )
+                        if page * 10 >= total:
+                            break
+                        if not page_items:
+                            raise RuntimeError("campaign catalogue pagination stopped early")
+                        page += 1
+
+                current: dict[str, JsonType] = {}
+                changed: list[tuple[str, str]] = []
+                for item in items:
+                    campaign_id = str(item.get("twitch_id") or "")
+                    try:
+                        UUID(campaign_id)
+                    except ValueError:
                         continue
-                changed.append((campaign_id, updated_at))
-
-            async def fetch_detail(campaign_id: str, updated_at: str) -> tuple[str, JsonType]:
-                url = CATALOG_ORIGIN / f"api/v1/twitch/campaigns/{campaign_id}/"
-                async with self.request("GET", url, headers={"Accept": "application/json"}) as response:
-                    if response.status != 200:
-                        raise RuntimeError(f"campaign catalogue detail HTTP {response.status}")
-                    detail = await response.json()
-                if not isinstance(detail, dict) or detail.get("twitch_id") != campaign_id:
-                    raise RuntimeError("campaign catalogue returned invalid campaign details")
-                return campaign_id, {"updated_at": updated_at, "detail": detail}
-
-            for entries in chunk(changed, 10):
-                results = await asyncio.gather(
-                    *(fetch_detail(*entry) for entry in entries), return_exceptions=True
-                )
-                for result in results:
-                    if isinstance(result, asyncio.CancelledError):
-                        raise result
-                    if isinstance(result, BaseException):
-                        logger.warning("Unable to refresh a public campaign: %s", result)
-                    else:
-                        campaign_id, cached_item = result
+                    if not item.get("is_fully_imported"):
+                        continue
+                    updated_at = str(item.get("updated_at") or "")
+                    cached_item = cached.get(campaign_id)
+                    if isinstance(cached_item, dict) and isinstance(
+                        cached_item.get("detail"), dict
+                    ):
                         current[campaign_id] = cached_item
+                        if cached_item.get("updated_at") == updated_at:
+                            continue
+                    changed.append((campaign_id, updated_at))
+
+                async def fetch_detail(
+                    campaign_id: str, updated_at: str
+                ) -> tuple[str, JsonType]:
+                    url = CATALOG_ORIGIN / f"api/v1/twitch/campaigns/{campaign_id}/"
+                    detail = await fetch_json(url)
+                    if detail.get("twitch_id") != campaign_id:
+                        raise RuntimeError(
+                            "campaign catalogue returned invalid campaign details"
+                        )
+                    return campaign_id, {"updated_at": updated_at, "detail": detail}
+
+                for entries in chunk(changed, 10):
+                    results = await asyncio.gather(
+                        *(fetch_detail(*entry) for entry in entries),
+                        return_exceptions=True,
+                    )
+                    for result in results:
+                        if isinstance(result, asyncio.CancelledError):
+                            raise result
+                        if isinstance(result, BaseException):
+                            logger.warning("Unable to refresh a public campaign: %s", result)
+                        else:
+                            campaign_id, cached_item = result
+                            current[campaign_id] = cached_item
 
             CATALOG_CACHE.parent.mkdir(parents=True, exist_ok=True)
             json_save(CATALOG_CACHE, {"version": 1, "campaigns": current}, sort=True)
@@ -183,19 +221,23 @@ class WebTwitch(Twitch):
         if not is_campaign_list:
             return await super().gql_request(ops)
 
+        response: JsonType = {"data": {"currentUser": {"dropCampaigns": []}}}
         original_error: GQLException | None = None
-        try:
-            response = await super().gql_request(ops)
-            campaigns = ((response.get("data") or {}).get("currentUser") or {}).get(
-                "dropCampaigns"
-            )
-            if campaigns:
-                self._catalog_campaigns.clear()
-                return response
-        except GQLException as exc:
-            if "IntegrityCheckFailed" not in str(exc) and "failed integrity check" not in str(exc):
-                raise
-            original_error = exc
+        if not self._catalog_campaigns:
+            try:
+                response = await super().gql_request(ops)
+                campaigns = ((response.get("data") or {}).get("currentUser") or {}).get(
+                    "dropCampaigns"
+                )
+                if campaigns:
+                    return response
+            except GQLException as exc:
+                if (
+                    "IntegrityCheckFailed" not in str(exc)
+                    and "failed integrity check" not in str(exc)
+                ):
+                    raise
+                original_error = exc
 
         self._catalog_campaigns = await self._fetch_catalog()
         if not self._catalog_campaigns:

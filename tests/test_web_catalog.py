@@ -56,10 +56,12 @@ class WebCatalogTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "network.twitch.Twitch.gql_request",
             new=AsyncMock(side_effect=GQLException([{"message": "failed integrity check"}])),
-        ):
+        ) as twitch_request:
             response = await client.gql_request(GQL_QUERIES["Campaigns"])
+            await client.gql_request(GQL_QUERIES["Campaigns"])
 
         self.assertEqual(response["data"]["currentUser"]["dropCampaigns"][0]["id"], campaign_id)
+        twitch_request.assert_awaited_once()
         self.assertEqual(
             (await client.fetch_campaigns([(campaign_id, {"id": campaign_id})]))[campaign_id][
                 "timeBasedDrops"

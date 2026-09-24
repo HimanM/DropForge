@@ -11,7 +11,7 @@ from yarl import URL
 
 from core.constants import ClientType
 from core.exceptions import GQLException, LoginException
-from network.integrity import acquire_integrity_token
+from network.integrity import _stop_browser, acquire_integrity_token
 from network.twitch import Twitch, _AuthState, import_auth_token, validate_auth_token
 
 
@@ -49,6 +49,17 @@ class TwitchAuthTests(unittest.TestCase):
 
         with self.assertRaisesRegex(LoginException, "invalid client"):
             asyncio.run(auth._oauth_login())
+
+    def test_windows_integrity_stops_the_browser_process_tree(self):
+        process = SimpleNamespace(pid=123, poll=Mock(return_value=None), wait=Mock())
+        with (
+            patch("network.integrity.sys.platform", "win32"),
+            patch("network.integrity.subprocess.run") as taskkill,
+        ):
+            _stop_browser(process)
+
+        self.assertEqual(taskkill.call_args.args[0], ["taskkill", "/PID", "123", "/T", "/F"])
+        process.wait.assert_called_once_with(5)
 
 
 class TwitchIntegrityTests(unittest.IsolatedAsyncioTestCase):
@@ -108,6 +119,7 @@ class TwitchIntegrityTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch("network.integrity._browser", return_value="browser"),
             patch("network.integrity.subprocess.Popen", return_value=process),
+            patch("network.integrity._stop_browser") as stop_browser,
             patch("network.integrity.aiohttp.ClientSession", return_value=Session()),
             patch("network.integrity._call", browser_call),
             patch("network.integrity.asyncio.sleep", new=AsyncMock()),
@@ -131,6 +143,7 @@ class TwitchIntegrityTests(unittest.IsolatedAsyncioTestCase):
         expression = browser_call.await_args_list[6].args[3]["expression"]
         self.assertIn("ViewerDropsDashboard", expression)
         self.assertIn("Client-Integrity", expression)
+        stop_browser.assert_called_once_with(process)
 
 
 class TwitchTokenImportAsyncTests(unittest.IsolatedAsyncioTestCase):

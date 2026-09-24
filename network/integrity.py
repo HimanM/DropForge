@@ -9,6 +9,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import quote
 
@@ -16,6 +17,42 @@ import aiohttp
 
 
 KPSDK_SCRIPT = "https://k.twitchcdn.net/149e9513-01fa-4fb0-aad4-566afd725d1b/2d206a39-8ed7-437e-a3be-862e0f06eea3/p.js"
+
+
+@contextmanager
+def _temporary_profile():
+    profile = tempfile.mkdtemp(prefix="dropforge-integrity-")
+    try:
+        yield profile
+    finally:
+        # Chrome can release cache files slightly after its main process exits.
+        # A stale disposable profile is preferable to terminating the miner.
+        shutil.rmtree(profile, ignore_errors=True)
+
+
+def _stop_browser(process: subprocess.Popen) -> None:
+    if sys.platform == "win32":
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                timeout=5,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            if process.poll() is None:
+                process.kill()
+    elif process.poll() is None:
+        os.killpg(process.pid, signal.SIGTERM)
+    try:
+        process.wait(5)
+    except subprocess.TimeoutExpired:
+        if sys.platform == "win32":
+            process.kill()
+        else:
+            os.killpg(process.pid, signal.SIGKILL)
 
 
 def _browser() -> str:
@@ -64,9 +101,7 @@ async def acquire_integrity_token(
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
 
-    with tempfile.TemporaryDirectory(
-        prefix="dropforge-integrity-", ignore_cleanup_errors=True
-    ) as profile:
+    with _temporary_profile() as profile:
         command = [
             browser,
             "--disable-gpu",
@@ -189,15 +224,4 @@ document.addEventListener('kpsdk-load',configure,{{once:true}});document.addEven
                         user_agent,
                     )
         finally:
-            if process.poll() is None:
-                if sys.platform == "win32":
-                    process.terminate()
-                else:
-                    os.killpg(process.pid, signal.SIGTERM)
-                try:
-                    process.wait(5)
-                except subprocess.TimeoutExpired:
-                    if sys.platform == "win32":
-                        process.kill()
-                    else:
-                        os.killpg(process.pid, signal.SIGKILL)
+            _stop_browser(process)
