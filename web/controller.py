@@ -13,7 +13,8 @@ from core.exceptions import CaptchaRequired
 from core.settings import Settings
 from core.translate import _
 from core.utils import ExponentialBackoff, lock_file
-from network.twitch import Twitch, import_auth_token
+from network.twitch import import_auth_token
+from web.catalog import WebTwitch
 from web.discord import DiscordNotifier
 from web.manager import WebManager
 
@@ -22,7 +23,7 @@ class MinerController:
     def __init__(self, notifier: DiscordNotifier | None = None) -> None:
         self.notifier = notifier
         self.manager: WebManager | None = None
-        self._client: Twitch | None = None
+        self._client: WebTwitch | None = None
         self._task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
         self._instance_lock: io.TextIOWrapper | None = None
@@ -80,7 +81,7 @@ class MinerController:
         if was_running:
             await self.stop(notify=False)
         try:
-            return await import_auth_token(token)
+            return await import_auth_token(token, verify_campaign_access=False)
         finally:
             if was_running:
                 await self.start()
@@ -136,7 +137,7 @@ class MinerController:
                 logging.getLogger("TwitchDrops.gql").setLevel(settings.debug_gql)
                 logging.getLogger("TwitchDrops.websocket").setLevel(settings.debug_ws)
                 self._logging_configured = True
-            client = Twitch(
+            client = WebTwitch(
                 settings,
                 gui_factory=lambda twitch: WebManager(twitch, self.notifier),
             )

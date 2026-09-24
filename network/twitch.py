@@ -72,7 +72,9 @@ gql_logger = logging.getLogger("TwitchDrops.gql")
 PERSISTED_QUERY_WARNING_AFTER = 15 * 60
 
 
-async def validate_auth_token(token: str) -> tuple[Any, int, int]:
+async def validate_auth_token(
+    token: str, *, verify_campaign_access: bool = True
+) -> tuple[Any, int, int]:
     """Validate a pasted token and verify that it can read the full drops dashboard."""
     token = token.strip()
     if not 20 <= len(token) <= 512 or not token.isascii() or any(char.isspace() for char in token):
@@ -100,6 +102,8 @@ async def validate_auth_token(token: str) -> tuple[Any, int, int]:
             raise ValueError(
                 "This token belongs to a restricted Twitch client. Import an auth-token from twitch.tv in a desktop browser."
             )
+        if not verify_campaign_access:
+            return client, int(validation["user_id"]), 0
 
         headers = {
             "Accept": "*/*",
@@ -162,10 +166,17 @@ async def validate_auth_token(token: str) -> tuple[Any, int, int]:
     return client, int(validation["user_id"]), campaign_count
 
 
-async def import_auth_token(token: str, path: os.PathLike[str] = COOKIES_PATH) -> dict[str, Any]:
+async def import_auth_token(
+    token: str,
+    path: os.PathLike[str] = COOKIES_PATH,
+    *,
+    verify_campaign_access: bool = True,
+) -> dict[str, Any]:
     """Validate and atomically store a Twitch auth-token without discarding other cookies."""
     token = token.strip()
-    client, user_id, campaign_count = await validate_auth_token(token)
+    client, user_id, campaign_count = await validate_auth_token(
+        token, verify_campaign_access=verify_campaign_access
+    )
     cookie_path = os.fspath(path)
     jar = aiohttp.CookieJar()
     if os.path.exists(cookie_path):
@@ -191,6 +202,7 @@ async def import_auth_token(token: str, path: os.PathLike[str] = COOKIES_PATH) -
         "client": "Twitch web" if client is ClientType.WEB else "Twitch Android",
         "user_id": user_id,
         "campaign_count": campaign_count,
+        "campaigns_verified": verify_campaign_access,
     }
 
 

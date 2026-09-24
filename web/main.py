@@ -57,13 +57,11 @@ def reset_password() -> int:
 def import_twitch_session() -> int:
     token = getpass.getpass("Twitch auth-token cookie: ")
     try:
-        result = asyncio.run(import_auth_token(token))
+        result = asyncio.run(import_auth_token(token, verify_campaign_access=False))
     except ValueError as exc:
         raise SystemExit(f"Token not imported: {exc}") from None
-    print(
-        f"Twitch session imported for user {result['user_id']} "
-        f"({result['client']}, {result['campaign_count']} campaigns visible)."
-    )
+    print(f"Twitch session imported for user {result['user_id']} ({result['client']}).")
+    print("Campaign discovery will be verified when the web miner starts.")
     return 0
 
 

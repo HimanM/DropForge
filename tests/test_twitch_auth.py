@@ -330,6 +330,44 @@ class TwitchTokenImportAsyncTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(ValueError, "Twitch rejected this auth token"):
                 await validate_auth_token("invalid_token_long_enough_12345")
 
+    async def test_web_token_validation_uses_oauth_without_campaign_probe(self):
+        class MockSession:
+            def __init__(self, *_args, **_kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                pass
+
+            def get(self, _url, headers):
+                class Resp:
+                    status = 200
+
+                    async def __aenter__(self):
+                        return self
+
+                    async def __aexit__(self, *_args):
+                        pass
+
+                    async def json(self):
+                        return {"client_id": ClientType.WEB.CLIENT_ID, "user_id": 123456}
+
+                return Resp()
+
+            def post(self, *_args, **_kwargs):
+                raise AssertionError("Web-only OAuth validation must not call Twitch GQL")
+
+        with patch("aiohttp.ClientSession", MockSession):
+            client, user_id, count = await validate_auth_token(
+                "valid_token_value_here_12345", verify_campaign_access=False
+            )
+
+        self.assertIs(client, ClientType.WEB)
+        self.assertEqual((user_id, count), (123456, 0))
+        self.integrity_mock.assert_not_awaited()
+
     async def test_oauth_login_reports_error_and_allows_subsequent_login(self):
         login_form = SimpleNamespace(
             ask_auth_token=AsyncMock(side_effect=["short", ""]),
