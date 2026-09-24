@@ -395,7 +395,7 @@ EOF
 #!/usr/bin/env sh
 set -eu
 case "\${1:-status}" in
-  import-twitch-token)
+  login-twitch|import-twitch-token)
     was_active="\$(systemctl is-active "$SERVICE_NAME.service" 2>/dev/null || true)"
     if [ "\$(id -u)" -eq 0 ]; then
       systemctl stop "$SERVICE_NAME.service"
@@ -404,7 +404,7 @@ case "\${1:-status}" in
     fi
     export TDMINER_DATA_DIR="$DATA_DIR"
     set +e
-    "$APP_DIR/current/venv/bin/python" "$APP_DIR/current/tdminer_web.py" import-twitch-token
+    "$APP_DIR/current/venv/bin/python" "$APP_DIR/current/tdminer_web.py" "\$1"
     result=\$?
     set -e
     if [ "\$was_active" = "active" ]; then
@@ -433,7 +433,7 @@ case "\${1:-status}" in
     exec sudo journalctl -u "$SERVICE_NAME.service" -f
     ;;
   *)
-    echo "Usage: tdminer-web {status|start|stop|restart|logs|reset-password|import-twitch-token}" >&2
+    echo "Usage: tdminer-web {status|start|stop|restart|logs|reset-password|login-twitch|import-twitch-token}" >&2
     exit 2
     ;;
 esac

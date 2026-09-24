@@ -7,8 +7,9 @@ from types import SimpleNamespace
 
 from aiohttp.test_utils import TestClient, TestServer
 
+from core.constants import ClientType
 from web.auth import AuthStore
-from web.main import _password
+from web.main import _TerminalLogin, _login_twitch_android, _password
 from web.controller import MinerController
 from web.server import create_app
 
@@ -46,6 +47,41 @@ class PasswordPromptTests(unittest.TestCase):
         with patch("web.main.getpass.getpass", return_value="short"):
             with self.assertRaisesRegex(SystemExit, "Invalid password: Password must be at least 12"):
                 _password()
+
+
+class TwitchTerminalLoginTests(unittest.IsolatedAsyncioTestCase):
+    async def test_credentials_are_reused_only_for_the_2fa_prompt(self) -> None:
+        form = _TerminalLogin()
+        with (
+            patch("builtins.input", return_value="streamer"),
+            patch("web.main.getpass.getpass", side_effect=["secret-password", "123456"]),
+        ):
+            first = await form.ask_login()
+            second = await form.ask_login()
+
+        self.assertEqual(
+            (first.username, first.password, first.token),
+            ("streamer", "secret-password", ""),
+        )
+        self.assertEqual(second.token, "123456")
+
+    async def test_android_login_closes_session_before_saving_token(self) -> None:
+        session = SimpleNamespace(close=AsyncMock())
+        auth = SimpleNamespace(_login=AsyncMock(return_value="android-token"))
+        client = SimpleNamespace(_auth_state=auth, _session=session)
+        result = {"client": "Twitch Android", "user_id": 123, "campaign_count": 42}
+
+        with (
+            patch("web.main.Settings"),
+            patch("web.main.Twitch", return_value=client),
+            patch("web.main.import_auth_token", new=AsyncMock(return_value=result)) as save,
+        ):
+            self.assertEqual(await _login_twitch_android(), result)
+
+        self.assertEqual(client._client_type.CLIENT_ID, ClientType.ANDROID_APP.CLIENT_ID)
+        self.assertEqual(len(auth.device_id), 32)
+        session.close.assert_awaited_once()
+        save.assert_awaited_once_with("android-token")
 
 
 class WebStateTests(unittest.TestCase):
