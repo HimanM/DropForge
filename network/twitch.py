@@ -115,19 +115,19 @@ async def validate_auth_token(token: str) -> tuple[Any, int, int]:
         headers["Client-Session-Id"] = create_nonce(CHARS_HEX_LOWER, 16)
         if client is ClientType.WEB:
             try:
-                integrity_token, _ = await acquire_integrity_token(
+                integrity_token, _, browser_user_agent = await acquire_integrity_token(
                     {
                         "Client-ID": client.CLIENT_ID,
                         "Authorization": f"OAuth {token}",
                         "Client-Session-Id": headers["Client-Session-Id"],
                     },
                     headers["X-Device-Id"],
-                    client.USER_AGENT,
                     GQL_QUERIES["Campaigns"],
                 )
             except RuntimeError as exc:
                 raise ValueError(str(exc)) from None
             headers["Client-Integrity"] = integrity_token
+            headers["User-Agent"] = browser_user_agent
 
         payload: JsonType = {}
         for attempt in range(2):
@@ -217,6 +217,7 @@ class _AuthState:
         self.client_version: str
         self.integrity_token: str | None = None
         self.integrity_expires_at: float = 0.0
+        self.integrity_user_agent: str | None = None
 
     def _hasattrs(self, *attrs: str) -> bool:
         return all(hasattr(self, attr) for attr in attrs)
@@ -255,6 +256,7 @@ class _AuthState:
         )
         self.integrity_token = None
         self.integrity_expires_at = 0.0
+        self.integrity_user_agent = None
         self._logged_in.clear()
 
     async def _oauth_login(self) -> str:
@@ -540,14 +542,17 @@ class _AuthState:
                 return self.integrity_token
 
             try:
-                self.integrity_token, self.integrity_expires_at = await acquire_integrity_token(
+                (
+                    self.integrity_token,
+                    self.integrity_expires_at,
+                    self.integrity_user_agent,
+                ) = await acquire_integrity_token(
                     {
                         "Client-ID": ClientType.WEB.CLIENT_ID,
                         "Authorization": f"OAuth {self.access_token}",
                         "Client-Session-Id": self.session_id,
                     },
                     self.device_id,
-                    ClientType.WEB.USER_AGENT,
                 )
                 logger.debug("Acquired Twitch Client-Integrity token")
                 return self.integrity_token
@@ -652,6 +657,7 @@ class _AuthState:
         self._delattrs("access_token", "user_id")
         self.integrity_token = None
         self.integrity_expires_at = 0.0
+        self.integrity_user_agent = None
         session = self._twitch._session
         if session is None:
             return
@@ -1665,7 +1671,11 @@ class Twitch:
                 auth_state = await self.get_auth()
                 if hasattr(auth_state, "get_integrity_token"):
                     await auth_state.get_integrity_token()
-                headers = auth_state.headers(user_agent=self._client_type.USER_AGENT, gql=True)
+                headers = auth_state.headers(
+                    user_agent=getattr(auth_state, "integrity_user_agent", None)
+                    or self._client_type.USER_AGENT,
+                    gql=True,
+                )
                 if persisted_query_since is not None:
                     headers["Connection"] = "close"
                 async with self.request(

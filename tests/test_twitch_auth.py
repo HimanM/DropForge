@@ -90,7 +90,7 @@ class TwitchIntegrityTests(unittest.IsolatedAsyncioTestCase):
             side_effect=[
                 {},
                 {},
-                {},
+                {"result": {"value": "Mozilla/5.0 (X11; Linux x86_64) Chrome/151"}},
                 {"success": True},
                 {},
                 {},
@@ -113,17 +113,17 @@ class TwitchIntegrityTests(unittest.IsolatedAsyncioTestCase):
             patch("network.integrity.asyncio.sleep", new=AsyncMock()),
             patch("network.integrity.os.killpg", create=True),
         ):
-            proof, expiration = await acquire_integrity_token(
+            proof, expiration, user_agent = await acquire_integrity_token(
                 {"Authorization": "OAuth secret", "Client-ID": "client"},
                 "device",
-                ClientType.WEB.USER_AGENT,
                 {"operationName": "ViewerDropsDashboard"},
             )
 
         self.assertEqual((proof, expiration), ("proof", 1890000000))
-        user_agent = browser_call.await_args_list[2]
-        self.assertEqual(user_agent.args[2], "Network.setUserAgentOverride")
-        self.assertEqual(user_agent.args[3]["userAgent"], ClientType.WEB.USER_AGENT)
+        self.assertEqual(user_agent, "Mozilla/5.0 (X11; Linux x86_64) Chrome/151")
+        user_agent_call = browser_call.await_args_list[2]
+        self.assertEqual(user_agent_call.args[2], "Runtime.evaluate")
+        self.assertEqual(user_agent_call.args[3]["expression"], "navigator.userAgent")
         cookie = browser_call.await_args_list[3].args[3]
         self.assertEqual(cookie["name"], "auth-token")
         self.assertEqual(cookie["value"], "secret")
@@ -137,7 +137,9 @@ class TwitchTokenImportAsyncTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.integrity = patch(
             "network.twitch.acquire_integrity_token",
-            new=AsyncMock(return_value=("test_integrity_token_abc", 1890000000)),
+            new=AsyncMock(
+                return_value=("test_integrity_token_abc", 1890000000, "test-browser-agent")
+            ),
         )
         self.integrity_mock = self.integrity.start()
         self.addCleanup(self.integrity.stop)
@@ -433,6 +435,7 @@ class TwitchTokenImportAsyncTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(count, 1)
             gql_headers = [h for u, h in recorded_headers if "gql" in u and "integrity" not in u]
             self.assertTrue(any(h.get("Client-Integrity") == "test_integrity_token_abc" for h in gql_headers))
+            self.assertTrue(any(h.get("User-Agent") == "test-browser-agent" for h in gql_headers))
 
     async def test_get_integrity_token_caches_and_refreshes(self):
         twitch = SimpleNamespace(
@@ -443,8 +446,8 @@ class TwitchTokenImportAsyncTests(unittest.IsolatedAsyncioTestCase):
         auth.device_id = "test-device"
         auth.access_token = "test-access"
         self.integrity_mock.side_effect = [
-            ("token_1", 1890000000),
-            ("token_2", 1890000000),
+            ("token_1", 1890000000, "browser-agent-1"),
+            ("token_2", 1890000000, "browser-agent-2"),
         ]
 
         # First fetch acquires token
@@ -508,6 +511,7 @@ class TwitchTokenImportAsyncTests(unittest.IsolatedAsyncioTestCase):
         auth.user_id = 1234
         auth.session_id = "session-123"
         auth.device_id = "device-123"
+        auth.integrity_user_agent = "browser-agent"
         auth._logged_in.set()
         twitch._auth_state = auth
 
@@ -522,7 +526,10 @@ class TwitchTokenImportAsyncTests(unittest.IsolatedAsyncioTestCase):
 
         auth.get_integrity_token = mock_get_integrity
 
+        request_headers = []
+
         def mock_request(method, url, **kwargs):
+            request_headers.append(kwargs["headers"])
             return MockRequestCtx(MockGQLResponse())
 
         twitch.request = mock_request
@@ -530,6 +537,7 @@ class TwitchTokenImportAsyncTests(unittest.IsolatedAsyncioTestCase):
         result = await twitch.gql_request({"operationName": "ViewerDropsDashboard"})
         self.assertEqual(attempts, 2)
         self.assertTrue(refresh_called)
+        self.assertTrue(all(headers["User-Agent"] == "browser-agent" for headers in request_headers))
         self.assertEqual(result["data"]["currentUser"]["dropCampaigns"], [{"id": "c1"}])
 
     async def test_gql_request_raises_on_unresolvable_integrity_failure(self):

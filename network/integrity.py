@@ -56,15 +56,17 @@ async def _call(ws: aiohttp.ClientWebSocketResponse, request_id: int, method: st
 
 
 async def acquire_integrity_token(
-    headers: dict[str, str], device_id: str, user_agent: str, probe: dict | None = None
-) -> tuple[str, float]:
+    headers: dict[str, str], device_id: str, probe: dict | None = None
+) -> tuple[str, float, str]:
     """Run Twitch's KPSDK in a disposable browser profile and return its signed proof."""
     browser = _browser()
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
 
-    with tempfile.TemporaryDirectory(prefix="dropforge-integrity-") as profile:
+    with tempfile.TemporaryDirectory(
+        prefix="dropforge-integrity-", ignore_cleanup_errors=True
+    ) as profile:
         command = [
             browser,
             "--disable-gpu",
@@ -121,12 +123,15 @@ async def acquire_integrity_token(
                         raise RuntimeError("A Twitch auth token is required for browser integrity.")
                     await _call(ws, 1, "Runtime.enable")
                     await _call(ws, 2, "Network.enable")
-                    await _call(
+                    user_agent_result = await _call(
                         ws,
                         3,
-                        "Network.setUserAgentOverride",
-                        {"userAgent": user_agent, "acceptLanguage": "en-US", "platform": "Win32"},
+                        "Runtime.evaluate",
+                        {"expression": "navigator.userAgent", "returnByValue": True},
                     )
+                    user_agent = user_agent_result.get("result", {}).get("value")
+                    if not isinstance(user_agent, str) or not user_agent:
+                        raise RuntimeError("Could not read the temporary browser user agent.")
                     cookie = await _call(
                         ws,
                         4,
@@ -178,7 +183,11 @@ document.addEventListener('kpsdk-load',configure,{{once:true}});document.addEven
                             f"{first.get('code') or first.get('message') or 'unknown error'}."
                         )
                     expiration = float(payload.get("expiration", 0))
-                    return payload["token"], expiration / 1000 if expiration > 1e11 else expiration
+                    return (
+                        payload["token"],
+                        expiration / 1000 if expiration > 1e11 else expiration,
+                        user_agent,
+                    )
         finally:
             if process.poll() is None:
                 if sys.platform == "win32":
