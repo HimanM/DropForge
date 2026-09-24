@@ -70,6 +70,18 @@ class WebCatalogTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(converted["game"]["boxArtURL"].startswith("https://"))
 
+    def test_catalog_merge_keeps_twitch_inventory_values(self):
+        client = WebTwitch(SimpleNamespace(), gui_factory=lambda _: SimpleNamespace())
+        client._catalog_campaigns = {"active": {}}
+
+        merged = client._merge_data(
+            {"self": {"currentMinutesWatched": 10, "isClaimed": False}},
+            {"self": {"currentMinutesWatched": None}, "name": "Campaign"},
+        )
+
+        self.assertEqual(merged["self"]["currentMinutesWatched"], 10)
+        self.assertEqual(merged["name"], "Campaign")
+
 
 if __name__ == "__main__":
     unittest.main()

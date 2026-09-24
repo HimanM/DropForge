@@ -26,6 +26,17 @@ class WebTwitch(Twitch):
         super().__init__(*args, **kwargs)
         self._catalog_campaigns: dict[str, JsonType] = {}
 
+    def _merge_data(self, primary_data: JsonType, secondary_data: JsonType) -> JsonType:
+        if not self._catalog_campaigns:
+            return super()._merge_data(primary_data, secondary_data)
+        merged = dict(secondary_data)
+        for key, value in primary_data.items():
+            if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key] = self._merge_data(value, merged[key])
+            else:
+                merged[key] = value
+        return merged
+
     @staticmethod
     def _asset_url(value: str) -> str:
         return str(CATALOG_ORIGIN.join(URL(value))) if value else ""
