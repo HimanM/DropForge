@@ -3,69 +3,19 @@ from __future__ import annotations
 import argparse
 import asyncio
 import getpass
-import logging
 import os
 import secrets
-import sys
-from argparse import Namespace
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Any
 
 from aiohttp import web
 
-from core.constants import ClientType, WORKING_DIR
-from core.exceptions import CaptchaRequired, LoginException
-from core.settings import Settings
-from core.utils import CHARS_HEX_LOWER, create_nonce
-from network.twitch import Twitch, import_auth_token
+from core.constants import WORKING_DIR
+from network.twitch import import_auth_token
 from web.auth import AuthStore, PASSWORD_MIN_LENGTH, validate_password
 from web.server import create_app
 
 
 DEFAULT_PORT = 17473
-
-
-class _TerminalLogin:
-    def __init__(self) -> None:
-        self.username = ""
-        self.password = ""
-        self.needs_code = False
-
-    async def ask_login(self) -> SimpleNamespace:
-        while not self.username:
-            self.username = input("Twitch username: ").strip()
-        while not self.password:
-            self.password = getpass.getpass("Twitch password: ")
-        code = getpass.getpass("Twitch 2FA or email code: ").strip() if self.needs_code else ""
-        self.needs_code = True
-        return SimpleNamespace(username=self.username, password=self.password, token=code)
-
-    def clear(self, login: bool = False, password: bool = False, token: bool = False) -> None:
-        if not login and not password and not token:
-            login = password = True
-        if login:
-            self.username = ""
-        if password:
-            self.password = ""
-            self.needs_code = False
-
-
-class _TerminalManager:
-    def __init__(self, _twitch: Twitch) -> None:
-        self.login = _TerminalLogin()
-        self.close_requested = False
-        self._closed = asyncio.Event()
-
-    @staticmethod
-    def print(message: str) -> None:
-        print(message)
-
-    async def coro_unless_closed(self, awaitable: Any) -> Any:
-        return await awaitable
-
-    async def wait_until_closed(self) -> None:
-        await self._closed.wait()
 
 
 def _password(confirm: bool = True) -> str:
@@ -117,49 +67,6 @@ def import_twitch_session() -> int:
     return 0
 
 
-async def _login_twitch_android() -> dict[str, Any]:
-    args = Namespace(
-        log=False,
-        tray=False,
-        dump=False,
-        logging_level=logging.WARNING,
-        debug_ws=logging.NOTSET,
-        debug_gql=logging.NOTSET,
-    )
-    client = Twitch(Settings(args), gui_factory=_TerminalManager)
-    client._client_type = ClientType.ANDROID_APP
-    client._auth_state.device_id = create_nonce(CHARS_HEX_LOWER, 32)
-    try:
-        token = await client._auth_state._login()
-    finally:
-        if client._session is not None:
-            await client._session.close()
-            client._session = None
-    return await import_auth_token(token)
-
-
-def login_twitch() -> int:
-    if not sys.stdin.isatty():
-        raise SystemExit("Twitch login requires an interactive terminal.")
-    print("Credentials are sent directly to Twitch and are not saved by DropForge.")
-    try:
-        result = asyncio.run(_login_twitch_android())
-    except CaptchaRequired:
-        raise SystemExit(
-            "Twitch requires a CAPTCHA for this login. "
-            "Wait before retrying or log in from a trusted network."
-        ) from None
-    except (LoginException, ValueError) as exc:
-        raise SystemExit(f"Twitch login failed: {exc}") from None
-    except (EOFError, KeyboardInterrupt):
-        raise SystemExit("Twitch login cancelled.") from None
-    print(
-        f"Twitch Android session saved for user {result['user_id']} "
-        f"({result['campaign_count']} campaigns visible)."
-    )
-    return 0
-
-
 def serve(host: str, port: int, no_auto_start: bool) -> int:
     auth_path = Path(WORKING_DIR, "web-auth.sqlite3")
     if not AuthStore(auth_path).is_provisioned():
@@ -182,7 +89,6 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("provision")
     sub.add_parser("reset-password")
     sub.add_parser("import-twitch-token")
-    sub.add_parser("login-twitch")
     args = parser.parse_args(argv)
     if args.command == "provision":
         return provision()
@@ -190,8 +96,6 @@ def main(argv: list[str] | None = None) -> int:
         return reset_password()
     if args.command == "import-twitch-token":
         return import_twitch_session()
-    if args.command == "login-twitch":
-        return login_twitch()
     return serve(args.host, args.port, args.no_auto_start)
 
 

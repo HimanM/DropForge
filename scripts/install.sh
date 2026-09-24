@@ -395,7 +395,12 @@ EOF
 #!/usr/bin/env sh
 set -eu
 case "\${1:-status}" in
-  login-twitch|import-twitch-token)
+  login-twitch)
+    echo "Twitch retired the password-login endpoint used by this command." >&2
+    echo "Use: tdminer-web import-twitch-token" >&2
+    exit 1
+    ;;
+  import-twitch-token)
     was_active="\$(systemctl is-active "$SERVICE_NAME.service" 2>/dev/null || true)"
     if [ "\$(id -u)" -eq 0 ]; then
       systemctl stop "$SERVICE_NAME.service"
@@ -433,7 +438,7 @@ case "\${1:-status}" in
     exec sudo journalctl -u "$SERVICE_NAME.service" -f
     ;;
   *)
-    echo "Usage: tdminer-web {status|start|stop|restart|logs|reset-password|login-twitch|import-twitch-token}" >&2
+    echo "Usage: tdminer-web {status|start|stop|restart|logs|reset-password|import-twitch-token}" >&2
     exit 2
     ;;
 esac

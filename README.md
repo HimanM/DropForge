@@ -72,7 +72,6 @@ tdminer-web stop
 tdminer-web restart
 tdminer-web logs
 tdminer-web reset-password
-tdminer-web login-twitch
 tdminer-web import-twitch-token
 ```
 
@@ -80,13 +79,13 @@ Stopping `tdminer-web` stops both the Web UI and mining. Starting it again resum
 
 ### Connect a Twitch account
 
-For a Linux Web UI installation, the recommended login is:
+For a Linux Web UI installation, import the `auth-token` cookie from a signed-in desktop browser:
 
 ```sh
-tdminer-web login-twitch
+tdminer-web import-twitch-token
 ```
 
-This stops the DropForge service temporarily, asks for the Twitch username, password, and any required 2FA or email code in the terminal, and restarts the service afterward. Credentials are sent directly to Twitch and are never saved; only the resulting Android session token is stored. This client avoids Twitch's browser-integrity requirement on headless servers.
+The old `tdminer-web login-twitch` password flow was removed after Twitch retired its login endpoint. DropForge never asks for your Twitch password.
 
 The Web UI and Windows GUI offer **Log in with Twitch** and **Import auth token**. To import a browser session, open your browser's developer tools, find Cookies for `https://www.twitch.tv`, and copy only the value named `auth-token`. Treat it like a password.
 
