@@ -27,6 +27,7 @@ def campaign(game_name: str = "Priority Game", drop_id: str = "drop-1") -> Simpl
         required_minutes=60,
         ends_at=datetime.now(timezone.utc) + timedelta(days=1),
         is_claimed=False,
+        is_earned=False,
         is_free_badge=False,
     )
     item = SimpleNamespace(
@@ -38,6 +39,7 @@ def campaign(game_name: str = "Priority Game", drop_id: str = "drop-1") -> Simpl
         link_url="https://www.twitch.tv/drops/campaigns",
         ends_at=datetime.now(timezone.utc) + timedelta(days=1),
         claimed_drops=1,
+        completed_drops=1,
         total_drops=2,
         finished=False,
         has_free_badge=False,
@@ -94,6 +96,16 @@ class DiscordNotificationTests(unittest.TestCase):
             "New priority Drops detected",
             "Drop claimed",
         ])
+
+    def test_earned_unclaimed_drop_sends_completion_message(self) -> None:
+        selected = campaign()
+        selected.drops[0].is_earned = True
+
+        self.notifier.drop_updated(selected.drops[0], ["Priority Game"])
+
+        message = self.payloads[0]["embeds"][0]
+        self.assertEqual(message["title"], "Drop earned")
+        self.assertEqual(message["fields"][-1]["name"], "Delivery")
 
     def test_idle_reason_is_deduplicated_and_recovery_is_reported(self) -> None:
         selected = campaign()

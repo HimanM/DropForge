@@ -151,7 +151,9 @@ class DiscordNotifier:
 
     def drop_updated(self, drop: TimedDrop, priority: list[str]) -> None:
         campaign = drop.campaign
-        if drop.is_claimed and self.store.claim_notification_event(f"discord:claimed:{drop.id}"):
+        if (drop.is_claimed or drop.is_earned) and self.store.claim_notification_event(
+            f"discord:claimed:{drop.id}"
+        ):
             if campaign.game.name in priority and self._enabled("claimed"):
                 self._schedule(self._claimed_payload(drop))
         if campaign.finished and self.store.claim_notification_event(
@@ -381,15 +383,25 @@ class DiscordNotifier:
         campaign = drop.campaign
         reward = ", ".join(benefit.name for benefit in drop.benefits) or drop.name
         thumbnail = next((_image(benefit.image_url) for benefit in drop.benefits if _image(benefit.image_url)), None)
+        title = (
+            "Free badge earned"
+            if drop.is_free_badge
+            else "Drop claimed" if drop.is_claimed else "Drop earned"
+        )
+        fields = [
+            ("Category", campaign.game.name),
+            ("Campaign", campaign.name),
+            ("Campaign progress", f"{campaign.completed_drops}/{campaign.total_drops} Drops earned"),
+        ]
+        if not drop.is_claimed:
+            fields.append(
+                ("Delivery", "Watch requirement complete. Link or claim it in Twitch if required.")
+            )
         return self._payload([self._embed(
-            "Free badge earned" if drop.is_free_badge else "Drop claimed",
+            title,
             reward,
             _GREEN,
-            fields=[
-                ("Category", campaign.game.name),
-                ("Campaign", campaign.name),
-                ("Campaign progress", f"{campaign.claimed_drops}/{campaign.total_drops} Drops claimed"),
-            ],
+            fields=fields,
             image=_image(campaign.image_url),
             thumbnail=thumbnail,
             url=str(campaign.link_url),
@@ -398,7 +410,7 @@ class DiscordNotifier:
     def _campaign_complete_payload(self, campaign: DropsCampaign) -> dict[str, Any]:
         return self._payload([self._embed(
             "Priority campaign complete",
-            "Every earnable Drop in this campaign has been claimed.",
+            "Every earnable Drop in this campaign has finished its watch requirement.",
             _GREEN,
             fields=[("Category", campaign.game.name), ("Campaign", campaign.name)],
             image=_image(campaign.image_url),
