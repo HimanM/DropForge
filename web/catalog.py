@@ -46,13 +46,16 @@ class WebTwitch(Twitch):
     def _asset_url(value: str) -> str:
         return str(CATALOG_ORIGIN.join(URL(value))) if value else ""
 
-    @staticmethod
-    def _reuse_cached_detail(item: JsonType, cached_item: JsonType) -> bool:
+    def _reuse_cached_detail(self, item: JsonType, cached_item: JsonType) -> bool:
+        game = item.get("game") or {}
         return (
             cached_item.get("updated_at") == str(item.get("updated_at") or "")
             and not (
                 str(item.get("status") or "").lower() == "active"
                 and item.get("allow_is_enabled") is True
+                and isinstance(game, dict)
+                and (game.get("display_name") or game.get("name"))
+                in getattr(self.settings, "priority", ())
             )
         )
 

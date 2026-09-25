@@ -91,20 +91,21 @@ class WebCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(merged["name"], "Campaign")
 
     def test_active_channel_acl_bypasses_unchanged_cache_timestamp(self):
+        client = WebTwitch(
+            SimpleNamespace(priority=["WARDOGS"]),
+            gui_factory=lambda _: SimpleNamespace(),
+        )
         cached = {"updated_at": "same", "detail": {}}
+        item = {
+            "updated_at": "same",
+            "status": "active",
+            "allow_is_enabled": True,
+            "game": {"display_name": "WARDOGS"},
+        }
 
-        self.assertFalse(
-            WebTwitch._reuse_cached_detail(
-                {"updated_at": "same", "status": "active", "allow_is_enabled": True},
-                cached,
-            )
-        )
-        self.assertTrue(
-            WebTwitch._reuse_cached_detail(
-                {"updated_at": "same", "status": "active", "allow_is_enabled": False},
-                cached,
-            )
-        )
+        self.assertFalse(client._reuse_cached_detail(item, cached))
+        item["game"]["display_name"] = "Other game"
+        self.assertTrue(client._reuse_cached_detail(item, cached))
 
     def test_cached_campaign_details_expire(self):
         now = 1_000_000
