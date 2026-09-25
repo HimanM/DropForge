@@ -43,6 +43,16 @@ class WebTwitch(Twitch):
     def _asset_url(value: str) -> str:
         return str(CATALOG_ORIGIN.join(URL(value))) if value else ""
 
+    @staticmethod
+    def _reuse_cached_detail(item: JsonType, cached_item: JsonType) -> bool:
+        return (
+            cached_item.get("updated_at") == str(item.get("updated_at") or "")
+            and not (
+                str(item.get("status") or "").lower() == "active"
+                and item.get("allow_is_enabled") is True
+            )
+        )
+
     @classmethod
     def _convert_campaign(cls, data: JsonType) -> JsonType:
         game = data["game"]
@@ -181,7 +191,7 @@ class WebTwitch(Twitch):
                         cached_item.get("detail"), dict
                     ):
                         current[campaign_id] = cached_item
-                        if cached_item.get("updated_at") == updated_at:
+                        if self._reuse_cached_detail(item, cached_item):
                             continue
                     changed.append((campaign_id, updated_at))
 
