@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from time import time
 from uuid import UUID
 
 import aiohttp
@@ -17,6 +18,8 @@ from network.twitch import Twitch
 logger = logging.getLogger("TwitchDrops")
 CATALOG_ORIGIN = URL("https://ttvdrops.lovinator.space")
 CATALOG_CACHE = CACHE_PATH / "campaign-catalog.json"
+CATALOG_DETAIL_TTL = 24 * 60 * 60
+CATALOG_REFRESH_BATCH = 10
 
 
 class WebTwitch(Twitch):
@@ -51,6 +54,13 @@ class WebTwitch(Twitch):
                 str(item.get("status") or "").lower() == "active"
                 and item.get("allow_is_enabled") is True
             )
+        )
+
+    @staticmethod
+    def _cache_expired(cached_item: JsonType, now: float) -> bool:
+        fetched_at = cached_item.get("fetched_at")
+        return not isinstance(fetched_at, (int, float)) or fetched_at <= (
+            now - CATALOG_DETAIL_TTL
         )
 
     @classmethod
@@ -177,6 +187,8 @@ class WebTwitch(Twitch):
 
                 current: dict[str, JsonType] = {}
                 changed: list[tuple[str, str]] = []
+                refreshed_cached = 0
+                now = time()
                 for item in items:
                     campaign_id = str(item.get("twitch_id") or "")
                     try:
@@ -192,7 +204,12 @@ class WebTwitch(Twitch):
                     ):
                         current[campaign_id] = cached_item
                         if self._reuse_cached_detail(item, cached_item):
-                            continue
+                            if (
+                                refreshed_cached >= CATALOG_REFRESH_BATCH
+                                or not self._cache_expired(cached_item, now)
+                            ):
+                                continue
+                            refreshed_cached += 1
                     changed.append((campaign_id, updated_at))
 
                 async def fetch_detail(
@@ -204,7 +221,11 @@ class WebTwitch(Twitch):
                         raise RuntimeError(
                             "campaign catalogue returned invalid campaign details"
                         )
-                    return campaign_id, {"updated_at": updated_at, "detail": detail}
+                    return campaign_id, {
+                        "updated_at": updated_at,
+                        "fetched_at": int(time()),
+                        "detail": detail,
+                    }
 
                 for entries in chunk(changed, 10):
                     results = await asyncio.gather(

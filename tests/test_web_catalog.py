@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 from core.constants import GQL_QUERIES
 from core.exceptions import GQLException
-from web.catalog import WebTwitch
+from web.catalog import CATALOG_DETAIL_TTL, WebTwitch
 
 
 def catalog_campaign():
@@ -103,6 +103,17 @@ class WebCatalogTests(unittest.IsolatedAsyncioTestCase):
             WebTwitch._reuse_cached_detail(
                 {"updated_at": "same", "status": "active", "allow_is_enabled": False},
                 cached,
+            )
+        )
+
+    def test_cached_campaign_details_expire(self):
+        now = 1_000_000
+
+        self.assertFalse(WebTwitch._cache_expired({"fetched_at": now}, now))
+        self.assertTrue(
+            WebTwitch._cache_expired(
+                {"fetched_at": now - CATALOG_DETAIL_TTL},
+                now,
             )
         )
 
