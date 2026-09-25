@@ -31,6 +31,8 @@ class WebTwitch(Twitch):
             return super()._merge_data(primary_data, secondary_data)
         merged = dict(secondary_data)
         for key, value in primary_data.items():
+            if key == "allow" and isinstance(merged.get(key), dict):
+                continue
             if isinstance(value, dict) and isinstance(merged.get(key), dict):
                 merged[key] = self._merge_data(value, merged[key])
             else:

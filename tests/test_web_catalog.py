@@ -75,11 +75,19 @@ class WebCatalogTests(unittest.IsolatedAsyncioTestCase):
         client._catalog_campaigns = {"active": {}}
 
         merged = client._merge_data(
-            {"self": {"currentMinutesWatched": 10, "isClaimed": False}},
-            {"self": {"currentMinutesWatched": None}, "name": "Campaign"},
+            {
+                "self": {"currentMinutesWatched": 10, "isClaimed": False},
+                "allow": {"channels": [{"name": "Subroza"}]},
+            },
+            {
+                "self": {"currentMinutesWatched": None},
+                "allow": {"channels": [{"name": "VALORANT"}]},
+                "name": "Campaign",
+            },
         )
 
         self.assertEqual(merged["self"]["currentMinutesWatched"], 10)
+        self.assertEqual(merged["allow"]["channels"], [{"name": "VALORANT"}])
         self.assertEqual(merged["name"], "Campaign")
 
 

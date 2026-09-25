@@ -168,12 +168,13 @@ class MinerController:
                 self._client.save(force=True)
                 self._client.gui.stop()
             self._client = None
+            self.manager = None
             instance_lock.close()
             self._instance_lock = None
         return restart
 
     def snapshot(self) -> dict[str, Any]:
-        state = self.manager.snapshot() if self.manager is not None else {
+        state = self.manager.snapshot() if self.running and self.manager is not None else {
             "status": "Stopped",
             "icon_state": "idle",
             "login": {"status": "Miner stopped", "user_id": "-", "activation_url": "", "user_code": ""},
