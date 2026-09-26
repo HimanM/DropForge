@@ -134,6 +134,7 @@ class WebManager(TUIManager):
             "current_minutes": drop.current_minutes,
             "required_minutes": drop.required_minutes,
             "claimed": drop.is_claimed,
+            "earned": drop.is_earned,
             "claimable": drop.can_claim,
             "starts": drop.starts_at.isoformat(),
             "ends": drop.ends_at.isoformat(),
@@ -150,6 +151,8 @@ class WebManager(TUIManager):
             campaigns.append(
                 {
                     **(asdict(summary) if summary is not None else {}),
+                    "linked": campaign.linked,
+                    "eligible": campaign.eligible,
                     "category_image_url": str(campaign.image_url),
                     "link_url": campaign.link_url,
                     "drops": [self._drop(drop) for drop in campaign.drops],

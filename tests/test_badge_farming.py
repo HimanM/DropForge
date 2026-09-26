@@ -94,6 +94,18 @@ class BadgeFarmingTests(unittest.TestCase):
         assert watch is not None
         self.assertTrue(watch.is_claimed)
 
+    def test_verified_watch_completion_stops_farming_without_claim(self) -> None:
+        campaign = _campaign(self.twitch)
+        item = campaign.get_drop("item")
+        assert item is not None
+
+        item.update_minutes(30)
+        item.extra_current_minutes = 15
+
+        self.assertTrue(item.is_earned)
+        self.assertEqual(item.current_minutes, 30)
+        self.assertFalse(item.can_earn())
+
     def test_mark_badge_complete_persists_and_refreshes_inventory(self) -> None:
         campaign = _campaign(self.twitch)
         watch = campaign.get_drop("watch-badge")

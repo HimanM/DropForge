@@ -246,7 +246,12 @@ class TimedDrop(BaseDrop):
 
     @property
     def current_minutes(self) -> int:
-        return self.real_current_minutes + self.extra_current_minutes
+        current = self.real_current_minutes + self.extra_current_minutes
+        return min(current, self.required_minutes) if self.required_minutes > 0 else current
+
+    @property
+    def is_earned(self) -> bool:
+        return self.required_minutes > 0 and self.real_current_minutes >= self.required_minutes
 
     @property
     def is_free_badge(self) -> bool:
@@ -299,6 +304,7 @@ class TimedDrop(BaseDrop):
         return (
             super()._base_earn_conditions()
             and self.required_minutes > 0
+            and not self.is_earned
             and (not self._twitch.badge_farming or self.is_free_badge)
             # NOTE: This may be a bad idea, as it invalidates the can_earn status
             # and provides no way to recover from this state until the next reload.
@@ -436,11 +442,15 @@ class DropsCampaign:
 
     @property
     def finished(self) -> bool:
-        return all(d.is_claimed or d.required_minutes <= 0 for d in self.drops)
+        return all(d.is_claimed or d.is_earned or d.required_minutes <= 0 for d in self.drops)
 
     @property
     def claimed_drops(self) -> int:
         return sum(d.is_claimed for d in self.drops)
+
+    @property
+    def completed_drops(self) -> int:
+        return sum(d.is_claimed or d.is_earned for d in self.drops)
 
     @property
     def remaining_drops(self) -> int:

@@ -49,10 +49,11 @@ class PasswordPromptTests(unittest.TestCase):
 
 
 class WebStateTests(unittest.TestCase):
-    def test_stopped_miner_does_not_expose_stale_device_code(self):
+    def test_stopped_miner_does_not_expose_stale_state(self):
         controller = MinerController()
         controller.manager = SimpleNamespace(
             snapshot=lambda: {
+                "status": "Watching: stale-channel",
                 "login": {
                     "status": "Login required",
                     "user_id": "-",
@@ -64,6 +65,8 @@ class WebStateTests(unittest.TestCase):
 
         snapshot = controller.snapshot()
 
+        self.assertEqual(snapshot["status"], "Stopped")
+        self.assertEqual(snapshot["campaigns"], [])
         self.assertEqual(snapshot["login"]["activation_url"], "")
         self.assertEqual(snapshot["login"]["user_code"], "")
 

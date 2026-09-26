@@ -482,6 +482,12 @@ jobs:
         run: |
           echo "date_now=$(date --rfc-3339=seconds)" >> "${GITHUB_OUTPUT}"
           echo "app_version=$(python3 -c 'from version import __version__ as v; print(v)')" >> "${GITHUB_OUTPUT}"
+          echo "prerelease=$(python3 -c 'from version import __prerelease__ as v; print(str(v).lower())')" >> "${GITHUB_OUTPUT}"
+          {
+            echo 'release_message<<EOF'
+            python3 -c 'from version import __release_message__ as message; print(message.strip())'
+            echo EOF
+          } >> "${GITHUB_OUTPUT}"
           echo "sha_short=$(git rev-parse --short HEAD)" >> "${GITHUB_OUTPUT}"
 
       - name: Download build artifacts from previous jobs
@@ -500,6 +506,8 @@ jobs:
 
             - Build date: `${{steps.vars.outputs.date_now}}`
             - Reference commit: ${{github.sha}}
+
+            ${{steps.vars.outputs.release_message}}
 
             **Linux server or CLI install**
 
@@ -526,6 +534,6 @@ jobs:
             The Linux installer manages source releases, dependencies, systemd, and persistent data under `~/.local/share/tdminer`. The macOS release binary is self-contained. Launchers install to `~/.local/bin` by default and can be redirected with `TDMINER_INSTALL_DIR=/path/to/bin`.
 
           name: "Release v${{steps.vars.outputs.app_version}}"
-          prerelease: false
+          prerelease: ${{steps.vars.outputs.prerelease}}
           removeArtifacts: true
           tag: "v${{steps.vars.outputs.app_version}}"

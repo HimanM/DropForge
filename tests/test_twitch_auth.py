@@ -11,7 +11,7 @@ from yarl import URL
 
 from core.constants import ClientType
 from core.exceptions import GQLException, LoginException
-from network.integrity import acquire_integrity_token
+from network.integrity import _stop_browser, acquire_integrity_token
 from network.twitch import Twitch, _AuthState, import_auth_token, validate_auth_token
 
 
@@ -49,6 +49,17 @@ class TwitchAuthTests(unittest.TestCase):
 
         with self.assertRaisesRegex(LoginException, "invalid client"):
             asyncio.run(auth._oauth_login())
+
+    def test_windows_integrity_stops_the_browser_process_tree(self):
+        process = SimpleNamespace(pid=123, poll=Mock(return_value=None), wait=Mock())
+        with (
+            patch("network.integrity.sys.platform", "win32"),
+            patch("network.integrity.subprocess.run") as taskkill,
+        ):
+            _stop_browser(process)
+
+        self.assertEqual(taskkill.call_args.args[0], ["taskkill", "/PID", "123", "/T", "/F"])
+        process.wait.assert_called_once_with(5)
 
 
 class TwitchIntegrityTests(unittest.IsolatedAsyncioTestCase):
@@ -108,6 +119,7 @@ class TwitchIntegrityTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch("network.integrity._browser", return_value="browser"),
             patch("network.integrity.subprocess.Popen", return_value=process),
+            patch("network.integrity._stop_browser") as stop_browser,
             patch("network.integrity.aiohttp.ClientSession", return_value=Session()),
             patch("network.integrity._call", browser_call),
             patch("network.integrity.asyncio.sleep", new=AsyncMock()),
@@ -131,6 +143,7 @@ class TwitchIntegrityTests(unittest.IsolatedAsyncioTestCase):
         expression = browser_call.await_args_list[6].args[3]["expression"]
         self.assertIn("ViewerDropsDashboard", expression)
         self.assertIn("Client-Integrity", expression)
+        stop_browser.assert_called_once_with(process)
 
 
 class TwitchTokenImportAsyncTests(unittest.IsolatedAsyncioTestCase):
@@ -329,6 +342,44 @@ class TwitchTokenImportAsyncTests(unittest.IsolatedAsyncioTestCase):
         with patch("aiohttp.ClientSession", MockSession):
             with self.assertRaisesRegex(ValueError, "Twitch rejected this auth token"):
                 await validate_auth_token("invalid_token_long_enough_12345")
+
+    async def test_web_token_validation_uses_oauth_without_campaign_probe(self):
+        class MockSession:
+            def __init__(self, *_args, **_kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                pass
+
+            def get(self, _url, headers):
+                class Resp:
+                    status = 200
+
+                    async def __aenter__(self):
+                        return self
+
+                    async def __aexit__(self, *_args):
+                        pass
+
+                    async def json(self):
+                        return {"client_id": ClientType.WEB.CLIENT_ID, "user_id": 123456}
+
+                return Resp()
+
+            def post(self, *_args, **_kwargs):
+                raise AssertionError("Web-only OAuth validation must not call Twitch GQL")
+
+        with patch("aiohttp.ClientSession", MockSession):
+            client, user_id, count = await validate_auth_token(
+                "valid_token_value_here_12345", verify_campaign_access=False
+            )
+
+        self.assertIs(client, ClientType.WEB)
+        self.assertEqual((user_id, count), (123456, 0))
+        self.integrity_mock.assert_not_awaited()
 
     async def test_oauth_login_reports_error_and_allows_subsequent_login(self):
         login_form = SimpleNamespace(

@@ -89,7 +89,7 @@ The old `tdminer-web login-twitch` password flow was removed after Twitch retire
 
 The Web UI and Windows GUI offer **Log in with Twitch** and **Import auth token**. To import a browser session, open your browser's developer tools, find Cookies for `https://www.twitch.tv`, and copy only the value named `auth-token`. Treat it like a password.
 
-For Linux CLI/server installs, use `tdminer --import-token` or `tdminer-web import-twitch-token`. DropForge validates both the token and full drops-campaign access before replacing the saved token, and keeps a `cookies.jar.backup` copy. Browser tokens require Twitch's short-lived integrity proof, so desktop builds use an installed Chrome, Edge, or Brave and the Linux installer provisions Chromium with Xvfb for automatic hourly refresh. Set `TDMINER_BROWSER` only when the browser executable is in a custom location.
+For Linux CLI/server installs, use `tdminer --import-token` or `tdminer-web import-twitch-token`. Desktop GUI, CLI, and TUI builds verify full Twitch campaign access. The hosted Web UI verifies the token with Twitch's official OAuth endpoint, keeps a `cookies.jar.backup`, and uses the public [ttvdrops catalogue](https://ttvdrops.lovinator.space/) only when Twitch blocks campaign discovery on a datacenter server. Account progress and claims still come directly from Twitch; no Twitch token or account data is sent to the catalogue.
 
 One token can be copied to multiple installations, but only run one miner for that Twitch account at a time. Logging out of Twitch or revoking the session invalidates every copy.
 

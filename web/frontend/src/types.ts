@@ -15,6 +15,7 @@ export type Drop = {
   current_minutes: number
   required_minutes: number
   claimed: boolean
+  earned: boolean
   claimable: boolean
   starts: string
   ends: string
@@ -27,6 +28,7 @@ export type Campaign = {
   game: string
   status: string
   linked: boolean
+  eligible: boolean
   active: boolean
   upcoming: boolean
   expired: boolean
