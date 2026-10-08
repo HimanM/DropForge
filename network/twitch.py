@@ -7,7 +7,7 @@ import inspect
 import os
 import shutil
 from http.cookies import SimpleCookie
-from time import time
+from time import monotonic, time
 from copy import deepcopy
 from itertools import chain
 from functools import partial
@@ -70,6 +70,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger("TwitchDrops")
 gql_logger = logging.getLogger("TwitchDrops.gql")
 PERSISTED_QUERY_WARNING_AFTER = 15 * 60
+AUTH_CLIENTS = (ClientType.ANDROID_APP, ClientType.MOBILE_WEB, ClientType.WEB)
+
+
+def _client_for_id(client_id: object) -> ClientInfo | None:
+    return next((client for client in AUTH_CLIENTS if client.CLIENT_ID == client_id), None)
 
 
 async def validate_auth_token(
@@ -90,14 +95,7 @@ async def validate_auth_token(
                 raise ValueError("Twitch rejected this auth token. Copy a current auth-token cookie.")
             validation = await response.json()
 
-        client = next(
-            (
-                candidate
-                for candidate in (ClientType.ANDROID_APP, ClientType.WEB)
-                if candidate.CLIENT_ID == validation.get("client_id")
-            ),
-            None,
-        )
+        client = _client_for_id(validation.get("client_id"))
         if client is None:
             raise ValueError(
                 "This token belongs to a restricted Twitch client. Import an auth-token from twitch.tv in a desktop browser."
@@ -273,107 +271,29 @@ class _AuthState:
 
     async def _oauth_login(self) -> str:
         login_form: LoginForm = self._twitch.gui.login
-        if ask_auth_token := getattr(login_form, "ask_auth_token", None):
-            while True:
-                imported_token = await ask_auth_token()
-                if not imported_token:
-                    break
-                try:
-                    client, user_id, campaign_count = await validate_auth_token(imported_token)
-                    self._twitch._client_type = client
-                    logger.info(
-                        "Imported Twitch session for user %s with %s visible campaigns",
-                        user_id,
-                        campaign_count,
-                    )
-                    return imported_token.strip()
-                except ValueError as exc:
-                    logger.error("Failed to import Twitch session: %s", exc)
-                    self._twitch.print(f"Token import error: {exc}")
-                    if hasattr(login_form, "report_import_error"):
-                        login_form.report_import_error(str(exc))
-        client_info: ClientInfo = self._twitch._client_type
-        headers = {
-            "Accept": "application/json",
-            "Accept-Encoding": "gzip",
-            "Accept-Language": "en-US",
-            "Cache-Control": "no-cache",
-            "Client-Id": client_info.CLIENT_ID,
-            "Host": "id.twitch.tv",
-            "Origin": str(client_info.CLIENT_URL),
-            "Pragma": "no-cache",
-            "Referer": str(client_info.CLIENT_URL),
-            "User-Agent": client_info.USER_AGENT,
-            "X-Device-Id": self.device_id,
-        }
-        payload = {
-            "client_id": client_info.CLIENT_ID,
-            "scopes": "",  # no scopes needed
-        }
+        ask_auth_token = getattr(login_form, "ask_auth_token", None)
+        if ask_auth_token is None:
+            raise LoginException(
+                "Twitch device login no longer grants Drops access. Import a browser auth-token."
+            )
         while True:
-            try:
-                now = datetime.now(timezone.utc)
-                async with self._twitch.request(
-                    "POST", "https://id.twitch.tv/oauth2/device", headers=headers, data=payload
-                ) as response:
-                    # {
-                    #     "device_code": "40 chars [A-Za-z0-9]",
-                    #     "expires_in": 1800,
-                    #     "interval": 5,
-                    #     "user_code": "8 chars [A-Z]",
-                    #     "verification_uri": "https://www.twitch.tv/activate?device-code=ABCDEFGH"
-                    # }
-                    response_json: JsonType = await response.json()
-                    required_fields = (
-                        "device_code", "user_code", "interval", "verification_uri", "expires_in"
-                    )
-                    if response.status != 200 or not all(
-                        field in response_json for field in required_fields
-                    ):
-                        reason = response_json.get("message") or response_json.get("error")
-                        raise LoginException(
-                            f"Twitch device login failed (HTTP {response.status}): "
-                            f"{reason or 'unexpected response'}"
-                        )
-                    device_code: str = response_json["device_code"]
-                    user_code: str = response_json["user_code"]
-                    interval: int = response_json["interval"]
-                    verification_uri: URL = URL(response_json["verification_uri"])
-                    expires_at = now + timedelta(seconds=response_json["expires_in"])
-
-                # Print the code to the user, open them the activate page so they can type it in
-                await login_form.ask_enter_code(verification_uri, user_code)
-
-                payload = {
-                    "client_id": self._twitch._client_type.CLIENT_ID,
-                    "device_code": device_code,
-                    "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-                }
-                while True:
-                    # sleep first, not like the user is gonna enter the code *that* fast
-                    await asyncio.sleep(interval)
-                    async with self._twitch.request(
-                        "POST",
-                        "https://id.twitch.tv/oauth2/token",
-                        headers=headers,
-                        data=payload,
-                        invalidate_after=expires_at,
-                    ) as response:
-                        # 200 means success, 400 means the user haven't entered the code yet
-                        if response.status != 200:
-                            continue
-                        response_json = await response.json()
-                        # {
-                        #     "access_token": "40 chars [A-Za-z0-9]",
-                        #     "refresh_token": "40 chars [A-Za-z0-9]",
-                        #     "scope": [...],
-                        #     "token_type": "bearer"
-                        # }
-                        self.access_token = cast(str, response_json["access_token"])
-                        return self.access_token
-            except RequestInvalid:
-                # the device_code has expired, request a new code
+            imported_token = await ask_auth_token()
+            if not imported_token:
                 continue
+            try:
+                client, user_id, campaign_count = await validate_auth_token(imported_token)
+                self._twitch._client_type = client
+                logger.info(
+                    "Imported Twitch session for user %s with %s visible campaigns",
+                    user_id,
+                    campaign_count,
+                )
+                return imported_token.strip()
+            except ValueError as exc:
+                logger.error("Failed to import Twitch session: %s", exc)
+                self._twitch.print(f"Token import error: {exc}")
+                if hasattr(login_form, "report_import_error"):
+                    login_form.report_import_error(str(exc))
 
     async def _login(self) -> str:
         logger.info("Login flow started")
@@ -629,14 +549,7 @@ class _AuthState:
                 else:
                     raise RuntimeError("Login verification failure (step #2)")
                 # Existing Android and browser sessions can both access the full drops API.
-                restored_client = next(
-                    (
-                        candidate
-                        for candidate in (ClientType.ANDROID_APP, ClientType.WEB)
-                        if candidate.CLIENT_ID == validate_response["client_id"]
-                    ),
-                    None,
-                )
+                restored_client = _client_for_id(validate_response["client_id"])
                 if restored_client is not None:
                     self._twitch._client_type = client_info = restored_client
                     session.headers["User-Agent"] = restored_client.USER_AGENT
@@ -1197,27 +1110,34 @@ class Twitch:
 
     async def _watch_sleep(self, delay: float) -> None:
         # we use wait_for here to allow an asyncio.sleep-like that can be ended prematurely
-        self._watching_restart.clear()
         with suppress(asyncio.TimeoutError):
             await asyncio.wait_for(self._watching_restart.wait(), timeout=delay)
+        self._watching_restart.clear()
 
     @task_wrapper(critical=True)
     async def _watch_loop(self) -> NoReturn:
         interval: float = WATCH_INTERVAL.total_seconds()
+        next_progress = monotonic() + 20
         while True:
             channel: Channel = await self.watching_channel.get()
             if not channel.online:
                 # if the channel isn't online anymore, we stop watching it
                 self.stop_watching()
                 continue
-            # logger.log(CALL, f"Sending watch payload to: {channel.name}")
+            stream = channel._stream
+            started = monotonic()
             succeeded: bool = await channel.send_watch()
-            last_sent: float = time()
             if not succeeded:
                 logger.log(CALL, f"Watch requested failed for channel: {channel.name}")
-            # wait ~20 seconds for a progress update
-            await asyncio.sleep(20)
-            if self.gui.progress.minute_almost_done():
+            await self._watch_sleep(max(0, 10 - (monotonic() - started)))
+            if stream is None or not channel._watch_current(stream):
+                continue
+            if (
+                succeeded
+                and monotonic() >= next_progress
+                and self.gui.progress.minute_almost_done()
+            ):
+                next_progress = monotonic() + interval
                 # If the previous update was more than ~60s ago, and the progress tracker
                 # isn't counting down anymore, that means Twitch has temporarily
                 # stopped reporting drop's progress. To ensure the timer keeps at least somewhat
@@ -1227,16 +1147,21 @@ class Twitch:
 
                 # Solution 1: use GQL to query for the currently mined drop status
                 try:
-                    context = await self.gql_request(
-                        GQL_QUERIES["CurrentDrop"].with_variables(
-                            {"channelID": str(channel.id)}
-                        )
+                    context = await asyncio.wait_for(
+                        self.gql_request(
+                            GQL_QUERIES["CurrentDrop"].with_variables(
+                                {"channelID": str(channel.id)}
+                            )
+                        ),
+                        timeout=5,
                     )
                     drop_data: JsonType | None = (
                         context["data"]["currentUser"]["dropCurrentSession"]
                     )
-                except GQLException:
+                except (GQLException, TimeoutError):
                     drop_data = None
+                if not channel._watch_current(stream):
+                    continue
                 if drop_data is not None:
                     gql_drop: TimedDrop | None = self._drops.get(drop_data["dropID"])
                     if gql_drop is not None and gql_drop.can_earn(channel):
@@ -1265,7 +1190,6 @@ class Twitch:
                         handled = True
                     else:
                         logger.log(CALL, "No active drop could be determined")
-            await self._watch_sleep(interval - min(time() - last_sent, interval))
 
     @task_wrapper(critical=True)
     async def _maintenance_task(self) -> None:
@@ -1760,6 +1684,14 @@ class Twitch:
                                 delay = max(delay, 5)
                                 force_retry = True
                                 break
+                            elif (
+                                error_dict["message"].startswith("Unauthorized")
+                                or error_dict.get("extensions", {}).get("code")
+                                in {"UNAUTHORIZED", "Unauthorized"}
+                            ):
+                                logger.warning("Twitch rejected the saved authorization; login is required")
+                                auth_state.invalidate(delete_cookies=True)
+                                raise ReloadRequest()
                             elif error_dict["message"] == "server error":
                                 # nullify the key the error path points to
                                 data_dict: JsonType = response_json["data"]

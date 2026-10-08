@@ -10,9 +10,15 @@ import aiohttp
 from yarl import URL
 
 from core.constants import ClientType
-from core.exceptions import GQLException, LoginException
+from core.exceptions import GQLException, LoginException, ReloadRequest
 from network.integrity import _stop_browser, acquire_integrity_token
-from network.twitch import Twitch, _AuthState, import_auth_token, validate_auth_token
+from network.twitch import (
+    Twitch,
+    _AuthState,
+    _client_for_id,
+    import_auth_token,
+    validate_auth_token,
+)
 
 
 class _Response:
@@ -31,23 +37,23 @@ class _Request:
 
 
 class TwitchAuthTests(unittest.TestCase):
-    def test_working_device_login_client_is_default(self):
+    def test_mobile_web_client_is_default(self):
         twitch = Twitch(
             SimpleNamespace(),
             gui_factory=lambda _: SimpleNamespace(),
         )
         self.assertIs(twitch._client_type, ClientType.MOBILE_WEB)
+        self.assertIs(_client_for_id(ClientType.MOBILE_WEB.CLIENT_ID), ClientType.MOBILE_WEB)
 
-    def test_device_login_error_is_reported_without_key_error(self):
+    def test_frontend_without_token_import_reports_supported_login_method(self):
         twitch = SimpleNamespace(
             _client_type=ClientType.MOBILE_WEB,
             gui=SimpleNamespace(login=SimpleNamespace()),
-            request=lambda *args, **kwargs: _Request(),
         )
         auth = _AuthState(twitch)
         auth.device_id = "test-device"
 
-        with self.assertRaisesRegex(LoginException, "invalid client"):
+        with self.assertRaisesRegex(LoginException, "Import a browser auth-token"):
             asyncio.run(auth._oauth_login())
 
     def test_windows_integrity_stops_the_browser_process_tree(self):
@@ -383,7 +389,7 @@ class TwitchTokenImportAsyncTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_oauth_login_reports_error_and_allows_subsequent_login(self):
         login_form = SimpleNamespace(
-            ask_auth_token=AsyncMock(side_effect=["short", ""]),
+            ask_auth_token=AsyncMock(side_effect=["short", "valid_token_value_here_12345"]),
             report_import_error=Mock(),
         )
         twitch = SimpleNamespace(
@@ -395,9 +401,14 @@ class TwitchTokenImportAsyncTests(unittest.IsolatedAsyncioTestCase):
         auth = _AuthState(twitch)
         auth.device_id = "test-device"
 
-        with self.assertRaisesRegex(LoginException, "invalid client"):
-            await auth._oauth_login()
+        with patch(
+            "network.twitch.validate_auth_token",
+            side_effect=[ValueError("Invalid Twitch auth-token."), (ClientType.WEB, 1234, 2)],
+        ):
+            token = await auth._oauth_login()
 
+        self.assertEqual(token, "valid_token_value_here_12345")
+        self.assertIs(twitch._client_type, ClientType.WEB)
         login_form.report_import_error.assert_called_once()
 
     async def test_find_cookie_matches_alternative_domains(self):
@@ -628,6 +639,35 @@ class TwitchTokenImportAsyncTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(GQLException):
             await twitch.gql_request({"operationName": "ViewerDropsDashboard"})
+
+    async def test_gql_unauthorized_clears_bad_session_and_reloads(self):
+        class MockGQLResponse:
+            async def json(self):
+                return {"errors": [{"message": 'Unauthorized: The "Authorization" token is invalid.'}]}
+
+        class MockRequestCtx:
+            async def __aenter__(self):
+                return MockGQLResponse()
+
+            async def __aexit__(self, *args):
+                return False
+
+        twitch = Twitch(SimpleNamespace(), gui_factory=lambda _: SimpleNamespace())
+        auth = _AuthState(twitch)
+        auth.access_token = "rejected-token"
+        auth.user_id = 1234
+        auth._logged_in.set()
+        twitch._auth_state = auth
+        twitch.get_auth = AsyncMock(return_value=auth)
+        auth.get_integrity_token = AsyncMock(return_value="mock_integrity")
+        auth.headers = Mock(return_value={})
+        auth.invalidate = Mock()
+        twitch.request = lambda method, url, **kwargs: MockRequestCtx()
+
+        with self.assertRaises(ReloadRequest):
+            await twitch.gql_request({"operationName": "ViewerDropsDashboard"})
+
+        auth.invalidate.assert_called_once_with(delete_cookies=True)
 
     async def test_fetch_inventory_handles_empty_or_null_campaigns_safely(self):
         gui = SimpleNamespace(status=SimpleNamespace(update=Mock()), inv=SimpleNamespace(clear=Mock(), add=Mock()))

@@ -1,0 +1,20 @@
+services:
+  dropforge:
+    image: ${DROPFORGE_IMAGE:-ghcr.io/himanm/dropforge:latest}
+    pull_policy: always
+    container_name: dropforge
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    shm_size: 256mb
+    ports:
+      - "127.0.0.1:17473:17473"
+    volumes:
+      - dropforge-data:/data
+    environment:
+      TZ: ${TZ:-UTC}
+      # Optional on first start; otherwise read the generated password from docker compose logs.
+      TDMINER_ADMIN_PASSWORD: ${TDMINER_ADMIN_PASSWORD:-}
+
+volumes:
+  dropforge-data:

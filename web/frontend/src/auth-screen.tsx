@@ -108,7 +108,7 @@ export function AuthScreen({ onAuthenticated }: Props) {
             Drops keep moving. Your miner stays close.
           </p>
           <p className="max-w-md text-base leading-relaxed text-stone-400">
-            Control campaigns, channels, settings, and Twitch device login from one private server.
+            Control campaigns, channels, settings, and Twitch session import from one private server.
           </p>
         </motion.div>
         <div className="relative flex gap-8 text-sm text-stone-400">

@@ -59,6 +59,7 @@ jobs:
           python3 -m unittest discover -s tests -p "test_tui*.py" -v
           python3 -m unittest discover -s tests -p "test_badge_farming.py" -v
           python3 -m unittest discover -s tests -p "test_twitch_auth.py" -v
+          python3 -m unittest discover -s tests -p "test_channel_watch.py" -v
 
       - name: Compile TUI modules
         run: |
@@ -102,6 +103,11 @@ jobs:
           python3 -m unittest discover -s tests -p "test_installer.py" -v
           python3 -m compileall -q web tdminer_web.py tui/manager.py
           bash -n scripts/install.sh
+          bash -n docker/entrypoint.sh
+          docker compose config
+
+      - name: Build Docker image
+        run: docker build --tag dropforge:test .
 
       - name: Upload install scripts
         if: github.event_name != 'pull_request'
