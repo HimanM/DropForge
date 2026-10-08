@@ -352,6 +352,9 @@ def create_app(auth_path: Path, static_path: Path, *, auto_start: bool = True) -
             return _json_error(f"Discord test failed: {exc}", 502)
         return web.json_response({"ok": True})
 
+    async def health(_request: web.Request) -> web.Response:
+        return web.json_response({"ok": True})
+
     async def frontend(request: web.Request) -> web.StreamResponse:
         static_root: Path = request.app["static_path"]
         tail = request.match_info.get("tail", "")
@@ -380,6 +383,7 @@ def create_app(auth_path: Path, static_path: Path, *, auto_start: bool = True) -
     app.router.add_put("/api/settings", update_settings)
     app.router.add_put("/api/notifications", update_notifications)
     app.router.add_post("/api/notifications/test", test_notifications)
+    app.router.add_get("/healthz", health)
     app.router.add_get("/{tail:.*}", frontend)
 
     @web.middleware

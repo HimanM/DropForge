@@ -93,6 +93,28 @@ For Linux CLI/server installs, use `tdminer --import-token` or `tdminer-web impo
 
 One token can be copied to multiple installations, but only run one miner for that Twitch account at a time. Logging out of Twitch or revoking the session invalidates every copy.
 
+### Docker Web UI
+
+Docker uses the same Web UI and persistent data format as the installer:
+
+```sh
+git clone https://github.com/HimanM/TwitchDropsMiner.git
+cd TwitchDropsMiner
+docker compose up -d --build
+docker compose logs dropforge
+```
+
+The first start prints a generated admin password and recovery code in the container logs. To choose the initial password instead, set `TDMINER_ADMIN_PASSWORD` before the first start. The named `dropforge-data` volume preserves the Twitch session, miner settings, web credentials, and recovery data across updates:
+
+```sh
+git pull
+docker compose up -d --build
+```
+
+The provided Compose file binds `127.0.0.1:17473` by default. Use Tailscale Serve or a trusted HTTPS reverse proxy for remote access. Change the host side of the port mapping to `0.0.0.0:17473:17473` only when direct LAN exposure is intentional.
+
+Connect Twitch from the Web UI with **Import auth token**. The container includes Chromium and Xvfb for Twitch integrity and campaign checks; it does not expose a remote browser or accept Twitch passwords.
+
 To uninstall the default Web UI installation while keeping `~/.local/share/tdminer/data` for a later reinstall:
 
 ```sh

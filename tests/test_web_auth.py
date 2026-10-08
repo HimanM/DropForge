@@ -102,6 +102,14 @@ class MinerSupervisorTests(unittest.IsolatedAsyncioTestCase):
 
 
 class WebResponseTests(unittest.IsolatedAsyncioTestCase):
+    async def test_health_check_does_not_require_login(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = create_app(Path(directory, "auth.sqlite3"), Path(directory), auto_start=False)
+            async with TestClient(TestServer(app)) as client:
+                response = await client.get("/healthz")
+                self.assertEqual(response.status, 200)
+                self.assertEqual(await response.json(), {"ok": True})
+
     async def test_api_responses_are_never_cached(self):
         with tempfile.TemporaryDirectory() as directory:
             app = create_app(
