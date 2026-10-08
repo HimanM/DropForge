@@ -12,7 +12,13 @@ from yarl import URL
 from core.constants import ClientType
 from core.exceptions import GQLException, LoginException
 from network.integrity import _stop_browser, acquire_integrity_token
-from network.twitch import Twitch, _AuthState, import_auth_token, validate_auth_token
+from network.twitch import (
+    Twitch,
+    _AuthState,
+    _client_for_id,
+    import_auth_token,
+    validate_auth_token,
+)
 
 
 class _Response:
@@ -37,6 +43,7 @@ class TwitchAuthTests(unittest.TestCase):
             gui_factory=lambda _: SimpleNamespace(),
         )
         self.assertIs(twitch._client_type, ClientType.MOBILE_WEB)
+        self.assertIs(_client_for_id(ClientType.MOBILE_WEB.CLIENT_ID), ClientType.MOBILE_WEB)
 
     def test_device_login_error_is_reported_without_key_error(self):
         twitch = SimpleNamespace(

@@ -70,6 +70,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger("TwitchDrops")
 gql_logger = logging.getLogger("TwitchDrops.gql")
 PERSISTED_QUERY_WARNING_AFTER = 15 * 60
+AUTH_CLIENTS = (ClientType.ANDROID_APP, ClientType.MOBILE_WEB, ClientType.WEB)
+
+
+def _client_for_id(client_id: object) -> ClientInfo | None:
+    return next((client for client in AUTH_CLIENTS if client.CLIENT_ID == client_id), None)
 
 
 async def validate_auth_token(
@@ -90,14 +95,7 @@ async def validate_auth_token(
                 raise ValueError("Twitch rejected this auth token. Copy a current auth-token cookie.")
             validation = await response.json()
 
-        client = next(
-            (
-                candidate
-                for candidate in (ClientType.ANDROID_APP, ClientType.WEB)
-                if candidate.CLIENT_ID == validation.get("client_id")
-            ),
-            None,
-        )
+        client = _client_for_id(validation.get("client_id"))
         if client is None:
             raise ValueError(
                 "This token belongs to a restricted Twitch client. Import an auth-token from twitch.tv in a desktop browser."
@@ -629,14 +627,7 @@ class _AuthState:
                 else:
                     raise RuntimeError("Login verification failure (step #2)")
                 # Existing Android and browser sessions can both access the full drops API.
-                restored_client = next(
-                    (
-                        candidate
-                        for candidate in (ClientType.ANDROID_APP, ClientType.WEB)
-                        if candidate.CLIENT_ID == validate_response["client_id"]
-                    ),
-                    None,
-                )
+                restored_client = _client_for_id(validate_response["client_id"])
                 if restored_client is not None:
                     self._twitch._client_type = client_info = restored_client
                     session.headers["User-Agent"] = restored_client.USER_AGENT
