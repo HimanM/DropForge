@@ -1,6 +1,6 @@
 FROM python:3.12-slim
 
-LABEL org.opencontainers.image.source="https://github.com/HimanM/TwitchDropsMiner" \
+LABEL org.opencontainers.image.source="https://github.com/HimanM/DropForge" \
       org.opencontainers.image.title="DropForge" \
       org.opencontainers.image.description="Self-hosted Twitch drops miner with an authenticated web UI"
 

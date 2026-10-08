@@ -87,7 +87,7 @@ tdminer-web import-twitch-token
 
 The old `tdminer-web login-twitch` password flow was removed after Twitch retired its login endpoint. DropForge never asks for your Twitch password.
 
-The Web UI and Windows GUI offer **Log in with Twitch** and **Import auth token**. To import a browser session, open your browser's developer tools, find Cookies for `https://www.twitch.tv`, and copy only the value named `auth-token`. Treat it like a password.
+The Web UI and Windows GUI offer **Open Twitch** and **Import auth token**. Sign in to Twitch in your browser, open the browser's developer tools, find Cookies for `https://www.twitch.tv`, and copy only the value named `auth-token`. Treat it like a password. Twitch's former device-code login can issue tokens that its Drops API rejects, so DropForge no longer offers that unreliable path.
 
 For Linux CLI/server installs, use `tdminer --import-token` or `tdminer-web import-twitch-token`. Desktop GUI, CLI, and TUI builds verify full Twitch campaign access. The hosted Web UI verifies the token with Twitch's official OAuth endpoint, keeps a `cookies.jar.backup`, and uses the public [ttvdrops catalogue](https://ttvdrops.lovinator.space/) only when Twitch blocks campaign discovery on a datacenter server. Account progress and claims still come directly from Twitch; no Twitch token or account data is sent to the catalogue.
 
@@ -95,21 +95,29 @@ One token can be copied to multiple installations, but only run one miner for th
 
 ### Docker Web UI
 
-Docker uses the same Web UI and persistent data format as the installer:
+The workflow publishes multi-architecture images for `linux/amd64` and `linux/arm64` to GitHub Container Registry. The provided Compose file pulls `ghcr.io/himanm/dropforge:latest`, binds the Web UI to localhost, and keeps all persistent state in a named volume:
 
 ```sh
-git clone https://github.com/HimanM/TwitchDropsMiner.git
-cd TwitchDropsMiner
-docker compose up -d --build
+mkdir -p dropforge && cd dropforge
+curl -fsSLO https://raw.githubusercontent.com/HimanM/DropForge/main/docker-compose.yml
+docker compose up -d
 docker compose logs dropforge
 ```
 
-The first start prints a generated admin password and recovery code in the container logs. To choose the initial password instead, set `TDMINER_ADMIN_PASSWORD` before the first start. The named `dropforge-data` volume preserves the Twitch session, miner settings, web credentials, and recovery data across updates:
+The first start prints a generated admin password and recovery code in the container logs. To choose the initial password instead, set `TDMINER_ADMIN_PASSWORD` before the first start. The `dropforge-data` volume preserves the Twitch session, miner settings, web credentials, and recovery data across image updates:
 
 ```sh
-git pull
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 ```
+
+Images pushed from development branches use a sanitized branch tag. To test one, replace `my-branch` with the branch tag shown by its Docker workflow:
+
+```sh
+DROPFORGE_IMAGE=ghcr.io/himanm/dropforge:my-branch docker compose up -d
+```
+
+After the first workflow run, make the `dropforge` package public in the repository's GitHub package settings so servers can pull without credentials. If it remains private, authenticate with `docker login ghcr.io` using a GitHub token with `read:packages`.
 
 The provided Compose file binds `127.0.0.1:17473` by default. Use Tailscale Serve or a trusted HTTPS reverse proxy for remote access. Change the host side of the port mapping to `0.0.0.0:17473:17473` only when direct LAN exposure is intentional.
 
@@ -185,7 +193,13 @@ Verbose logs:
 tdminer cli --log -vv
 ```
 
-The terminal login uses Twitch device activation. If login is needed, `tdminer` shows a URL and code. You can open the URL from the UI, copy it, or type it manually on another device for headless systems.
+Before the first terminal run, import a Twitch browser session:
+
+```sh
+tdminer --import-token
+```
+
+Paste only the `auth-token` cookie value when prompted, then start `tdminer` normally. If Twitch later rejects the saved authorization, DropForge removes that invalid token and asks for a replacement instead of terminating.
 
 ## CLI Commands
 
@@ -243,8 +257,8 @@ Type `/help` in the CLI to view all commands grouped by category with descriptio
 q  quit
 r  reload inventory/campaign data
 s  switch to the selected channel
-b  open Twitch login URL when login is pending
-c  copy Twitch login URL when login is pending
+b  open Twitch when login is pending (legacy terminal shortcut)
+c  copy a pending Twitch URL when available (legacy terminal shortcut)
 ```
 
 ## Settings Notes
@@ -258,7 +272,7 @@ c  copy Twitch login URL when login is pending
 ## Security Notes
 
 - `cookies.jar` stores your Twitch session. Keep it private.
-- Twitch may send a new-login email after device login. That is expected.
+- Importing a browser token reuses that Twitch session. Logging out of Twitch or revoking the session invalidates every copy.
 - Avoid watching Twitch in a browser with the same account while the miner is active, because Twitch may report progress inconsistently.
 
 ## Source Run

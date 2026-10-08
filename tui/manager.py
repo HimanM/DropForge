@@ -92,10 +92,19 @@ class TUILogin:
 
     async def ask_login(self) -> LoginData:
         self._manager.print(
-            "Username/password login is not used by the TUI. Device login will be requested."
+            "Username/password login is not used by the TUI. Import a browser auth-token."
         )
         await asyncio.sleep(0)
         return LoginData("", "", "")
+
+    async def ask_auth_token(self) -> str:
+        self.update("Import Twitch auth-token", None)
+        self._manager.print(
+            "Twitch device login no longer grants Drops access. "
+            "Import a Twitch browser auth-token here, or restart with --import-token."
+        )
+        await self._manager.coro_unless_closed(asyncio.Event().wait())
+        return ""
 
     async def ask_enter_code(self, page_url: URL, user_code: str) -> None:
         url = str(page_url)

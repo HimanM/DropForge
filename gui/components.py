@@ -550,8 +550,8 @@ class LoginForm:
         buttons.columnconfigure((0, 1), weight=1)
         self._button = ttk.Button(
             buttons,
-            text="Log in with Twitch",
-            command=self._choose_device_login,
+            text="Open Twitch",
+            command=lambda: webopen(URL("https://www.twitch.tv/drops/campaigns")),
             state="disabled",
         )
         self._button.grid(column=0, row=0, sticky="ew")
@@ -560,10 +560,6 @@ class LoginForm:
         )
         self._import_button.grid(column=1, row=0, sticky="ew", padx=(4, 0))
         self.update(_("gui", "login", "logged_out"), None)
-
-    def _choose_device_login(self) -> None:
-        self._imported_token = ""
-        self._auth_choice.set()
 
     def _choose_import(self) -> None:
         token = simpledialog.askstring(
@@ -612,7 +608,10 @@ class LoginForm:
             self._button.config(state="normal", command=self._confirm.set)
             await self._manager.coro_unless_closed(self._confirm.wait())
         finally:
-            self._button.config(state="disabled", command=self._choose_device_login)
+            self._button.config(
+                state="disabled",
+                command=lambda: webopen(URL("https://www.twitch.tv/drops/campaigns")),
+            )
 
     async def ask_login(self) -> LoginData:
         self.update(_("gui", "login", "required"), None)

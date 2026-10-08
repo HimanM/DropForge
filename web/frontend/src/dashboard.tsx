@@ -376,11 +376,11 @@ export function Dashboard({ session, onSignedOut }: Props) {
               {state.miner.running && state.login.user_id === "-" && (
                 <section className="rounded-2xl border border-orange-500/25 bg-orange-500/8 p-5 sm:flex sm:items-center sm:justify-between sm:gap-6">
                   <div>
-                    <p className="font-semibold">{state.login.activation_url ? "Connect Twitch" : "Preparing Twitch login"}</p>
-                    <p className="mt-1 text-sm text-muted-foreground">{state.login.activation_url ? <>Open Twitch activation and enter code <strong className="text-foreground">{state.login.user_code}</strong>.</> : "Waiting for Twitch’s authorization service. The activation code will appear here automatically."}</p>
+                    <p className="font-semibold">Connect Twitch</p>
+                    <p className="mt-1 text-sm text-muted-foreground">Import the <code>auth-token</code> cookie from a browser signed in to Twitch.</p>
                   </div>
                   <div className="mt-4 flex shrink-0 flex-wrap gap-2 sm:mt-0">
-                    {state.login.activation_url && <a className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground" href={state.login.activation_url} rel="noreferrer" target="_blank">Log in with Twitch<LinkSimpleIcon /></a>}
+                    <a className="inline-flex h-9 items-center gap-2 rounded-lg border border-input bg-background px-3 text-sm font-medium" href="https://www.twitch.tv/drops/campaigns" rel="noreferrer" target="_blank">Open Twitch<LinkSimpleIcon /></a>
                     <ImportTokenDialog busy={busy === "import-token"} onImport={importTwitch} />
                   </div>
                 </section>
@@ -555,7 +555,7 @@ function SettingsPanel({ draft, dirty, busy, session, notifications, notificatio
         </div>
       </SettingsGroup>
       <SettingsGroup title="Security" icon={<KeyIcon />}>
-        <p className="text-sm leading-relaxed text-muted-foreground">Changing the admin password revokes every browser session. Invalidating Twitch auth removes the saved Twitch token and starts device login again.</p>
+        <p className="text-sm leading-relaxed text-muted-foreground">Changing the admin password revokes every browser session. Invalidating Twitch auth removes the saved Twitch token and pauses mining until another browser token is imported.</p>
         <div className="flex flex-wrap gap-2"><PasswordDialog session={session} onSignedOut={onSignedOut} /><ImportTokenDialog busy={busy === "import-token"} onImport={onImport} /><ResetTwitchDialog busy={busy === "invalidate"} onConfirm={onInvalidate} /></div>
       </SettingsGroup>
     </div>
@@ -578,7 +578,7 @@ function PasswordDialog({ session, onSignedOut }: { session: SessionMeta; onSign
 }
 
 function ResetTwitchDialog({ busy, onConfirm }: { busy: boolean; onConfirm: () => void }) {
-  return <Dialog><DialogTrigger render={<Button variant="destructive" disabled={busy} />}>Reset Twitch login</DialogTrigger><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Reset Twitch login?</DialogTitle><DialogDescription>This removes the saved Twitch authorization and starts device login again. Mining pauses until you reconnect.</DialogDescription></DialogHeader><DialogFooter><DialogClose render={<Button variant="outline" />}>Cancel</DialogClose><DialogClose render={<Button variant="destructive" onClick={onConfirm} />}>Reset Twitch login</DialogClose></DialogFooter></DialogContent></Dialog>
+  return <Dialog><DialogTrigger render={<Button variant="destructive" disabled={busy} />}>Reset Twitch login</DialogTrigger><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Reset Twitch login?</DialogTitle><DialogDescription>This removes the saved Twitch authorization. Mining pauses until you import another browser auth-token.</DialogDescription></DialogHeader><DialogFooter><DialogClose render={<Button variant="outline" />}>Cancel</DialogClose><DialogClose render={<Button variant="destructive" onClick={onConfirm} />}>Reset Twitch login</DialogClose></DialogFooter></DialogContent></Dialog>
 }
 
 function ImportTokenDialog({ busy, onImport }: { busy: boolean; onImport: (token: string) => Promise<boolean> }) {

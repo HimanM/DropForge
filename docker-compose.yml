@@ -1,7 +1,7 @@
 services:
   dropforge:
-    build: .
-    image: dropforge:latest
+    image: ${DROPFORGE_IMAGE:-ghcr.io/himanm/dropforge:latest}
+    pull_policy: always
     container_name: dropforge
     init: true
     restart: unless-stopped
