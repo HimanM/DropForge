@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-REPO="${TDMINER_REPO:-HimanM/TwitchDropsMiner}"
+REPO="${TDMINER_REPO:-HimanM/DropForge}"
 REF="${TDMINER_REF:-main}"
 INSTALL_DIR="${TDMINER_INSTALL_DIR:-$HOME/.local/bin}"
 APP_DIR="${TDMINER_APP_DIR:-$HOME/.local/share/tdminer}"

@@ -48,8 +48,8 @@ The `tdminer` entry point auto-selects: on Windows it defaults to CLI, on Linux/
 #### GUI (from source)
 
 ```powershell
-git clone https://github.com/HimanM/TwitchDropsMiner.git
-cd TwitchDropsMiner
+git clone https://github.com/HimanM/DropForge.git
+cd DropForge
 
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -67,8 +67,8 @@ run_dev.bat
 #### TUI / CLI (from source)
 
 ```powershell
-git clone https://github.com/HimanM/TwitchDropsMiner.git
-cd TwitchDropsMiner
+git clone https://github.com/HimanM/DropForge.git
+cd DropForge
 
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -91,8 +91,8 @@ python tdminer.py tui
 #### GUI (from source)
 
 ```bash
-git clone https://github.com/HimanM/TwitchDropsMiner.git
-cd TwitchDropsMiner
+git clone https://github.com/HimanM/DropForge.git
+cd DropForge
 
 # Install system dependencies (Debian/Ubuntu)
 sudo apt install python3-tk gir1.2-ayatanaappindicator3-0.1
@@ -118,8 +118,8 @@ sudo pacman -S tk libayatana-appindicator
 #### TUI / CLI (from source)
 
 ```bash
-git clone https://github.com/HimanM/TwitchDropsMiner.git
-cd TwitchDropsMiner
+git clone https://github.com/HimanM/DropForge.git
+cd DropForge
 
 python3 -m venv .venv
 source .venv/bin/activate
@@ -140,8 +140,8 @@ python tdminer.py cli
 #### GUI (from source)
 
 ```bash
-git clone https://github.com/HimanM/TwitchDropsMiner.git
-cd TwitchDropsMiner
+git clone https://github.com/HimanM/DropForge.git
+cd DropForge
 
 python3 -m venv .venv
 source .venv/bin/activate
@@ -152,8 +152,8 @@ python main.py
 #### TUI / CLI (from source)
 
 ```bash
-git clone https://github.com/HimanM/TwitchDropsMiner.git
-cd TwitchDropsMiner
+git clone https://github.com/HimanM/DropForge.git
+cd DropForge
 
 python3 -m venv .venv
 source .venv/bin/activate
@@ -180,11 +180,11 @@ Termux cannot run pre-built Linux binaries because Android uses Bionic libc, not
 pkg install python clang curl tar
 
 # One-line install (recommended)
-curl -fsSL https://raw.githubusercontent.com/HimanM/TwitchDropsMiner/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/HimanM/DropForge/main/scripts/install.sh | sh
 
 # Or manual install
-git clone https://github.com/HimanM/TwitchDropsMiner.git
-cd TwitchDropsMiner
+git clone https://github.com/HimanM/DropForge.git
+cd DropForge
 
 python3 -m venv .venv
 source .venv/bin/activate
@@ -208,32 +208,32 @@ tdminer
 
 ## Pre-built Releases
 
-Download from: https://github.com/HimanM/TwitchDropsMiner/releases
+Download from: https://github.com/HimanM/DropForge/releases
 
 ### Available Release Assets
 
 | Asset | Platform | Frontend | Format |
 |-------|----------|----------|--------|
-| `Twitch.Drops.Miner.Windows.zip` | Windows x86_64 | GUI | Single .exe |
-| `Twitch.Drops.Miner.MacOS.zip` | macOS universal | GUI | .app bundle |
-| `Twitch.Drops.Miner.Linux.AppImage-x86_64.zip` | Linux x86_64 | GUI | AppImage |
-| `Twitch.Drops.Miner.Linux.AppImage-aarch64.zip` | Linux ARM64 | GUI | AppImage |
-| `Twitch.Drops.Miner.Linux.PyInstaller-x86_64.zip` | Linux x86_64 | GUI | Single binary |
-| `Twitch.Drops.Miner.Linux.PyInstaller-aarch64.zip` | Linux ARM64 | GUI | Single binary |
-| `Twitch.Drops.Miner.TUI.Linux-x86_64.zip` | Linux x86_64 | TUI/CLI | Single binary |
-| `Twitch.Drops.Miner.TUI.Linux-aarch64.zip` | Linux ARM64 | TUI/CLI | Single binary |
-| `Twitch.Drops.Miner.TUI.MacOS.zip` | macOS | TUI/CLI | Single binary |
+| `DropForge.Windows.zip` | Windows x86_64 | GUI | Single .exe |
+| `DropForge.MacOS.zip` | macOS universal | GUI | .app bundle |
+| `DropForge.Linux.AppImage-x86_64.zip` | Linux x86_64 | GUI | AppImage |
+| `DropForge.Linux.AppImage-aarch64.zip` | Linux ARM64 | GUI | AppImage |
+| `DropForge.Linux.PyInstaller-x86_64.zip` | Linux x86_64 | GUI | Single binary |
+| `DropForge.Linux.PyInstaller-aarch64.zip` | Linux ARM64 | GUI | Single binary |
+| `DropForge.TUI.Linux-x86_64.zip` | Linux x86_64 | TUI/CLI | Single binary |
+| `DropForge.TUI.Linux-aarch64.zip` | Linux ARM64 | TUI/CLI | Single binary |
+| `DropForge.TUI.MacOS.zip` | macOS | TUI/CLI | Single binary |
 
 ### Quick Install (Linux/macOS)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/HimanM/TwitchDropsMiner/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/HimanM/DropForge/main/scripts/install.sh | sh
 ```
 
 Custom install directory:
 
 ```bash
-TDMINER_INSTALL_DIR="$HOME/bin" curl -fsSL https://raw.githubusercontent.com/HimanM/TwitchDropsMiner/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/HimanM/DropForge/main/scripts/install.sh | TDMINER_INSTALL_DIR="$HOME/bin" sh
 ```
 
 After installation:
@@ -248,7 +248,7 @@ tdminer cli       # portable CLI (everywhere)
 
 ```bash
 pkg install python clang curl tar
-curl -fsSL https://raw.githubusercontent.com/HimanM/TwitchDropsMiner/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/HimanM/DropForge/main/scripts/install.sh | sh
 tdminer
 ```
 
@@ -273,8 +273,8 @@ The GUI build packages `main.py` with tkinter, pystray, and Pillow into a standa
 #### Windows GUI Build
 
 ```powershell
-git clone https://github.com/HimanM/TwitchDropsMiner.git
-cd TwitchDropsMiner
+git clone https://github.com/HimanM/DropForge.git
+cd DropForge
 
 # Set up environment (installs requirements.txt)
 setup_env.bat
@@ -303,8 +303,8 @@ The `build.bat` script:
 #### Linux GUI Build (PyInstaller)
 
 ```bash
-git clone https://github.com/HimanM/TwitchDropsMiner.git
-cd TwitchDropsMiner
+git clone https://github.com/HimanM/DropForge.git
+cd DropForge
 
 # Install system dependencies (Debian/Ubuntu)
 sudo apt install python3-tk gir1.2-ayatanaappindicator3-0.1 \
@@ -345,15 +345,15 @@ ARCH=x86_64 APP_VERSION=1.0.0 PYTHON_VERSION=3.10 \
     appimage-builder --recipe appimage/AppImageBuilder.yml
 ```
 
-Output: `Twitch.Drops.Miner-x86_64.AppImage`
+Output: `DropForge-x86_64.AppImage`
 
 The AppImage bundles Python, tkinter, and all dependencies. It runs on most Linux distributions without installation.
 
 #### macOS GUI Build
 
 ```bash
-git clone https://github.com/HimanM/TwitchDropsMiner.git
-cd TwitchDropsMiner
+git clone https://github.com/HimanM/DropForge.git
+cd DropForge
 
 python3 -m venv env
 source env/bin/activate
@@ -371,8 +371,8 @@ The TUI build packages `tdminer.py` with textual, rich, and prompt_toolkit into 
 #### Linux TUI Build
 
 ```bash
-git clone https://github.com/HimanM/TwitchDropsMiner.git
-cd TwitchDropsMiner
+git clone https://github.com/HimanM/DropForge.git
+cd DropForge
 
 python3 -m venv env
 source env/bin/activate
@@ -388,8 +388,8 @@ The binary works on Linux systems with compatible glibc. No Python installation 
 #### macOS TUI Build
 
 ```bash
-git clone https://github.com/HimanM/TwitchDropsMiner.git
-cd TwitchDropsMiner
+git clone https://github.com/HimanM/DropForge.git
+cd DropForge
 
 python3 -m venv env
 source env/bin/activate

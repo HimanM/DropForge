@@ -2238,8 +2238,8 @@ class HelpTab:
         ttk.Label(about, text="Repository: ", anchor="e").grid(column=0, row=2, sticky="nsew")
         LinkLabel(
             about,
-            link="https://github.com/HimanM/TwitchDropsMiner",
-            text="https://github.com/HimanM/TwitchDropsMiner",
+            link="https://github.com/HimanM/DropForge",
+            text="https://github.com/HimanM/DropForge",
         ).grid(column=1, row=2, sticky="nsew")
         # About - donate
         ttk.Separator(

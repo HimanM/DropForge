@@ -1,101 +1,200 @@
 <p align="center">
-  <img src="icons/dropforge.png" alt="DropForge icon" width="160">
+  <img src="icons/dropforge.png" alt="DropForge icon" width="152">
 </p>
 
-# DropForge
+<h1 align="center">DropForge</h1>
 
-DropForge is HimanM's desktop, server, and terminal Twitch drops miner.
+<p align="center">
+  A desktop, terminal, and self-hosted Twitch drops miner maintained by <a href="https://github.com/HimanM">HimanM</a>.
+</p>
 
-The miner advances Twitch drop progress without playing video. It logs in to Twitch, discovers campaigns, picks eligible channels, switches channels when needed, and claims drop progress in the background.
+<p align="center">
+  <a href="https://github.com/HimanM/DropForge/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/HimanM/DropForge?include_prereleases&style=flat-square"></a>
+  <a href="https://github.com/HimanM/DropForge/actions/workflows/ci.yml"><img alt="Build status" src="https://github.com/HimanM/DropForge/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/HimanM/DropForge/actions/workflows/docker.yml"><img alt="Docker image status" src="https://github.com/HimanM/DropForge/actions/workflows/docker.yml/badge.svg"></a>
+  <a href="https://github.com/HimanM/DropForge/pkgs/container/dropforge"><img alt="Latest container image" src="https://img.shields.io/badge/GHCR-ghcr.io%2Fhimanm%2Fdropforge-2496ED?style=flat-square&logo=docker&logoColor=white"></a>
+</p>
+
+DropForge discovers eligible Twitch campaigns, selects a live channel, advances watch progress without playing video, switches channels when needed, and claims supported rewards. Use the desktop GUI, Linux Web UI, terminal UI, portable CLI, or Docker image.
+
+> [!IMPORTANT]
+> Run only one DropForge instance per Twitch account. Running Twitch video or another miner with the same account can make progress reporting unreliable.
+
+## Table of contents
+
+- [Features](#features)
+- [Choose an interface](#choose-an-interface)
+- [Desktop GUI](#desktop-gui)
+- [Linux Web UI](#linux-web-ui)
+  - [Install](#install)
+  - [Connect Twitch](#connect-twitch)
+  - [Remote access](#remote-access)
+  - [Manage the service](#manage-the-service)
+  - [Update](#update)
+- [Docker](#docker)
+- [TUI and CLI](#tui-and-cli)
+- [Settings](#settings)
+- [Data and backups](#data-and-backups)
+- [Security](#security)
+- [Uninstall](#uninstall)
+- [Run from source](#run-from-source)
+- [Build and deployment](#build-and-deployment)
+- [Credits](#credits)
 
 ## Features
 
-- DropForge desktop GUI for normal desktop use.
-- DropForge Web UI for authenticated, image-rich Linux server control from desktop or mobile browsers.
-- DropForge terminal UI through `tdminer`.
-- Portable CLI mode for headless Linux, SSH sessions, Termux source installs, and terminals where full TUIs are awkward.
-- Twitch device-code login for terminal sessions.
-- Secure import of an existing Twitch browser `auth-token`.
-- Saved login through `cookies.jar`.
-- Campaign discovery and drop progress tracking.
-- Game priority and exclusion lists.
-- Automatic channel selection and manual channel switching.
-- Optional unlinked-drop farming for the Twitch linked-account display bug.
-- Optional idle farming for free watch-time badges; subscription (`0/0`) badges are skipped.
-- One-command Linux Web UI or CLI installer with in-place updates and persistent data.
+- Tracks active, upcoming, completed, excluded, and unlinked campaigns.
+- Prioritizes selected games and automatically switches to eligible live channels.
+- Supports allowed-channel campaigns and optional ACL bypass for incorrect Twitch channel eligibility data.
+- Can farm unlinked drops when Twitch reports the account-link state incorrectly.
+- Can farm free watch-time badges while priority work is idle. Subscription badges with `0/0` minutes are skipped.
+- Preserves Twitch login, settings, web credentials, and recovery data across updates.
+- Sends formatted Discord webhook notifications for selected priority categories.
+- Includes campaign, category, reward, progress, and channel artwork in the Web UI.
+- Recovers from transient GraphQL, integrity-token, and network failures without routine manual restarts.
 
-## Desktop Install
+## Choose an interface
 
-Download the latest release from:
+| Interface | Best for | Platforms | Start here |
+| --- | --- | --- | --- |
+| Desktop GUI | Regular desktop use | Windows, macOS, Linux | [Download a release](https://github.com/HimanM/DropForge/releases/latest) |
+| Web UI | Always-on home server or VPS | Linux, Docker | [One-command install](#install) |
+| TUI | Full-screen terminal use | Linux, macOS | `python tdminer.py tui` |
+| CLI | SSH, Termux, and simple terminals | Windows, Linux, macOS, Android | `python tdminer.py cli` |
+| Docker | Isolated self-hosting | Linux `amd64` and `arm64` | [Compose setup](#docker) |
 
-https://github.com/HimanM/TwitchDropsMiner/releases
+## Desktop GUI
 
-Unzip it, run the app, log in, then use the Settings tab to configure priority/excluded games.
+Download the newest archive from [GitHub Releases](https://github.com/HimanM/DropForge/releases/latest), extract it, and run DropForge.
 
-Persistent files such as `cookies.jar`, `settings.json`, `lock.file`, `cache/`, and logs live next to the executable or inside the app bundle, depending on the platform.
+| Platform | Release asset |
+| --- | --- |
+| Windows | `DropForge.Windows.zip` |
+| macOS | `DropForge.MacOS.zip` |
+| Linux AppImage | `DropForge.Linux.AppImage-<arch>.zip` |
+| Linux portable GUI | `DropForge.Linux.PyInstaller-<arch>.zip` |
 
-## Linux Server Install
+At the Twitch login prompt, choose **Import auth token** and paste the `auth-token` cookie from a signed-in Twitch browser. DropForge saves it in `cookies.jar` beside the portable app data.
 
-Run the installer and choose the Web UI or CLI when prompted:
+## Linux Web UI
+
+### Install
+
+Run the installer as your normal Linux user:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/HimanM/TwitchDropsMiner/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/HimanM/DropForge/main/scripts/install.sh | sh
 ```
 
-The first Web UI install prints a generated admin password and recovery code, then asks whether to bind to localhost or `0.0.0.0`. Localhost is recommended and selected by default. Re-running the same command updates the selected interface while preserving the bind choice, Twitch cookie jar, settings, admin credentials, recovery data, and browser sessions under `~/.local/share/tdminer/data`.
+Choose **Web UI** when prompted. The installer:
 
-For private remote access while keeping the app on localhost, install Tailscale and run:
+1. Installs the required system and Python packages.
+2. Installs DropForge under `~/.local/share/tdminer`.
+3. Creates and starts `tdminer-web.service`.
+4. Prints the access URL, admin password, and recovery code in a clearly marked block.
+5. Stores persistent data under `~/.local/share/tdminer/data`.
+
+The default address is `http://127.0.0.1:17473`. Save the generated admin password and recovery code before closing the terminal.
+
+To choose the first admin password yourself, use at least 12 characters:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/HimanM/DropForge/main/scripts/install.sh | \
+  TDMINER_ADMIN_PASSWORD='replace-with-a-strong-password' sh
+```
+
+If `tdminer-web` is not found after installation, add the default launcher directory to your shell path:
+
+```sh
+printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> ~/.profile
+. ~/.profile
+```
+
+### Connect Twitch
+
+Twitch retired the password endpoint used by older miners, and its device-code tokens may be rejected by the Drops API. DropForge imports a browser session instead and never asks for your Twitch password.
+
+1. Sign in at [twitch.tv](https://www.twitch.tv/) on a desktop browser.
+2. Open the browser developer tools.
+3. Open **Application** or **Storage**, then **Cookies**, then `https://www.twitch.tv`.
+4. Copy only the value of the cookie named `auth-token`.
+5. In DropForge, choose **Import auth token**, or run:
+
+```sh
+tdminer-web import-twitch-token
+```
+
+Treat the token like a password. The command briefly stops the miner, validates the session, saves it, and restores the service. Copying the same token to another installation is possible, but only one miner should run for that account.
+
+### Remote access
+
+Localhost is the recommended bind address. [Tailscale Serve](https://tailscale.com/kb/1242/tailscale-serve) provides private HTTPS access to devices on your tailnet:
 
 ```sh
 tailscale serve --bg http://127.0.0.1:17473
 ```
 
-To expose the port directly on every network interface instead:
+To expose DropForge directly to the LAN, reinstall or update with `0.0.0.0`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/HimanM/TwitchDropsMiner/main/scripts/install.sh | TDMINER_HOST=0.0.0.0 sh
+curl -fsSL https://raw.githubusercontent.com/HimanM/DropForge/main/scripts/install.sh | \
+  TDMINER_HOST=0.0.0.0 sh
 ```
 
-The installer remembers the selected interface. For unattended installs or to switch later:
+Then open `http://SERVER_IP:17473`. This is plain HTTP and listens on every reachable interface. Use it only on a trusted network or behind a trusted HTTPS reverse proxy.
+
+To use another port:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/HimanM/TwitchDropsMiner/main/scripts/install.sh | TDMINER_MODE=web sh
-curl -fsSL https://raw.githubusercontent.com/HimanM/TwitchDropsMiner/main/scripts/install.sh | TDMINER_MODE=cli sh
+curl -fsSL https://raw.githubusercontent.com/HimanM/DropForge/main/scripts/install.sh | \
+  TDMINER_PORT=28461 sh
 ```
 
-Web service commands:
+### Manage the service
+
+| Command | Action |
+| --- | --- |
+| `tdminer-web status` | Show service status |
+| `tdminer-web start` | Start the Web UI and miner controller |
+| `tdminer-web stop` | Stop the Web UI and mining |
+| `tdminer-web restart` | Restart the service |
+| `tdminer-web logs` | Follow service logs |
+| `tdminer-web reset-password` | Set a new admin password and revoke browser sessions |
+| `tdminer-web import-twitch-token` | Replace the saved Twitch session |
+
+Logging out of the website clears only the web browser session. It does not stop the miner or sign the saved Twitch session out.
+
+### Update
+
+Run the same installer command again:
 
 ```sh
-tdminer-web status
-tdminer-web start
-tdminer-web stop
-tdminer-web restart
-tdminer-web logs
-tdminer-web reset-password
-tdminer-web import-twitch-token
+curl -fsSL https://raw.githubusercontent.com/HimanM/DropForge/main/scripts/install.sh | sh
 ```
 
-Stopping `tdminer-web` stops both the Web UI and mining. Starting it again resumes the saved installation and Twitch session.
+The installer remembers the selected interface and bind address. It stages the new release, keeps persistent data, restarts the service, and restores the previous release if startup fails.
 
-### Connect a Twitch account
-
-For a Linux Web UI installation, import the `auth-token` cookie from a signed-in desktop browser:
+To switch an existing Linux installation between interfaces:
 
 ```sh
-tdminer-web import-twitch-token
+# Web UI
+curl -fsSL https://raw.githubusercontent.com/HimanM/DropForge/main/scripts/install.sh | TDMINER_MODE=web sh
+
+# Portable CLI
+curl -fsSL https://raw.githubusercontent.com/HimanM/DropForge/main/scripts/install.sh | TDMINER_MODE=cli sh
 ```
 
-The old `tdminer-web login-twitch` password flow was removed after Twitch retired its login endpoint. DropForge never asks for your Twitch password.
+## Docker
 
-The Web UI and Windows GUI offer **Open Twitch** and **Import auth token**. Sign in to Twitch in your browser, open the browser's developer tools, find Cookies for `https://www.twitch.tv`, and copy only the value named `auth-token`. Treat it like a password. Twitch's former device-code login can issue tokens that its Drops API rejects, so DropForge no longer offers that unreliable path.
+The latest multi-architecture image is published for `linux/amd64` and `linux/arm64`:
 
-For Linux CLI/server installs, use `tdminer --import-token` or `tdminer-web import-twitch-token`. Desktop GUI, CLI, and TUI builds verify full Twitch campaign access. The hosted Web UI verifies the token with Twitch's official OAuth endpoint, keeps a `cookies.jar.backup`, and uses the public [ttvdrops catalogue](https://ttvdrops.lovinator.space/) only when Twitch blocks campaign discovery on a datacenter server. Account progress and claims still come directly from Twitch; no Twitch token or account data is sent to the catalogue.
+```text
+ghcr.io/himanm/dropforge:latest
+```
 
-One token can be copied to multiple installations, but only run one miner for that Twitch account at a time. Logging out of Twitch or revoking the session invalidates every copy.
+The package and available tags are listed on the [DropForge container page](https://github.com/HimanM/DropForge/pkgs/container/dropforge).
 
-### Docker Web UI
-
-The workflow publishes multi-architecture images for `linux/amd64` and `linux/arm64` to GitHub Container Registry. The provided Compose file pulls `ghcr.io/himanm/dropforge:latest`, binds the Web UI to localhost, and keeps all persistent state in a named volume:
+### Docker Compose
 
 ```sh
 mkdir -p dropforge && cd dropforge
@@ -104,207 +203,194 @@ docker compose up -d
 docker compose logs dropforge
 ```
 
-The first start prints a generated admin password and recovery code in the container logs. To choose the initial password instead, set `TDMINER_ADMIN_PASSWORD` before the first start. The `dropforge-data` volume preserves the Twitch session, miner settings, web credentials, and recovery data across image updates:
+The Compose file publishes `127.0.0.1:17473`, restarts the container unless stopped, and stores state in the `dropforge-data` volume. The first logs contain the generated admin password and recovery code.
+
+Set the first admin password yourself if needed:
+
+```sh
+TDMINER_ADMIN_PASSWORD='replace-with-a-strong-password' docker compose up -d
+```
+
+Update the container without losing settings or sessions:
 
 ```sh
 docker compose pull
 docker compose up -d
 ```
 
-Images pushed from development branches use a sanitized branch tag. To test one, replace `my-branch` with the branch tag shown by its Docker workflow:
+Useful commands:
 
 ```sh
-DROPFORGE_IMAGE=ghcr.io/himanm/dropforge:my-branch docker compose up -d
+docker compose ps
+docker compose logs -f dropforge
+docker compose restart dropforge
+docker compose stop
+docker compose down
 ```
 
-After the first workflow run, make the `dropforge` package public in the repository's GitHub package settings so servers can pull without credentials. If it remains private, authenticate with `docker login ghcr.io` using a GitHub token with `read:packages`.
+`docker compose down` keeps the named data volume. `docker compose down -v` permanently deletes it.
 
-The provided Compose file binds `127.0.0.1:17473` by default. Use Tailscale Serve or a trusted HTTPS reverse proxy for remote access. Change the host side of the port mapping to `0.0.0.0:17473:17473` only when direct LAN exposure is intentional.
+## TUI and CLI
 
-Connect Twitch from the Web UI with **Import auth token**. The container includes Chromium and Xvfb for Twitch integrity and campaign checks; it does not expose a remote browser or accept Twitch passwords.
+On Linux, the one-command installer can install the CLI directly:
 
-To uninstall the default Web UI installation while keeping `~/.local/share/tdminer/data` for a later reinstall:
+```sh
+curl -fsSL https://raw.githubusercontent.com/HimanM/DropForge/main/scripts/install.sh | TDMINER_MODE=cli sh
+tdminer --import-token
+tdminer
+```
+
+The installed Linux launcher uses the portable CLI. For the Textual TUI, run from source or download `DropForge.TUI.<platform>.zip` from [GitHub Releases](https://github.com/HimanM/DropForge/releases/latest):
+
+```sh
+python tdminer.py tui
+```
+
+Force the portable CLI from source:
+
+```sh
+python tdminer.py cli
+```
+
+Add verbose file logging when troubleshooting:
+
+```sh
+python tdminer.py cli --log -vv
+```
+
+The CLI supports slash-command autocomplete. Type `/help` for the complete command list.
+
+| Command | Action |
+| --- | --- |
+| `/reload` | Refresh inventory and campaigns |
+| `/switch <channel>` | Switch to a listed channel |
+| `/priority add <game>` | Add a priority game |
+| `/priority remove <game>` | Remove a priority game |
+| `/exclude add <game>` | Exclude a game |
+| `/exclude remove <game>` | Remove an exclusion |
+| `/mode <mode>` | Select `priority-only`, `ending-soonest`, or `low-availability` |
+| `/farm-unlinked on\|off` | Toggle unlinked-drop farming in priority-only mode |
+| `/badges on\|off` | Include badge and emote campaigns in normal farming |
+| `/auto-badges on\|off` | Farm free watch-time badges while priority work is idle |
+| `/channels`, `/drops`, `/settings`, `/logs` | Change CLI view |
+| `/quit` | Exit DropForge |
+
+Termux installs from source because Android does not run glibc Linux binaries:
+
+```sh
+pkg install python clang curl tar
+curl -fsSL https://raw.githubusercontent.com/HimanM/DropForge/main/scripts/install.sh | sh
+tdminer --import-token
+tdminer
+```
+
+## Settings
+
+- **Priority mode** controls campaign order. **Priority list only** limits farming to selected games.
+- **Farm unlinked drops** is available only in priority-list-only mode.
+- **Trust allowed channels** follows Twitch campaign ACLs. Disable it only when Twitch shows a valid allowed channel but incorrectly marks it as ineligible.
+- **Badge and emote drops** includes those rewards in normal campaign selection.
+- **Auto-farm free badges** runs only when priority work is idle and skips subscription badges.
+- **Priority and excluded games** are managed in the dedicated Games page or the desktop Settings tab.
+- Use **Save and reload** after selection changes so the active inventory is rebuilt immediately.
+- Discord notifications are filtered to priority categories to avoid unrelated campaign spam.
+
+Some campaigns require a linked game account. Manage links at [Twitch Drops campaigns](https://www.twitch.tv/drops/campaigns).
+
+## Data and backups
+
+| Installation | Persistent data |
+| --- | --- |
+| Linux installer | `~/.local/share/tdminer/data` |
+| Docker Compose | `dropforge-data` volume mounted at `/data` |
+| Portable desktop build | Beside the executable or app bundle |
+| Source run | Repository working directory unless `TDMINER_DATA_DIR` is set |
+
+Important files include:
+
+| Path | Purpose |
+| --- | --- |
+| `cookies.jar` | Twitch session, keep private |
+| `cookies.jar.backup` | Last recoverable Twitch session |
+| `settings.json` | Miner, priority, webhook, and interface settings |
+| `web-auth.sqlite3` | Hashed web credentials and browser sessions |
+| `cache/` | Cached campaign and image data |
+| `log.txt` | File log when logging is enabled |
+
+Back up the data directory or Docker volume while DropForge is stopped. Updates do not replace these files.
+
+## Security
+
+- Web passwords and recovery codes are salted and hashed with scrypt.
+- Web session cookies are opaque and HttpOnly.
+- The Twitch `auth-token`, `cookies.jar`, recovery code, and Discord webhook URL are secrets.
+- Website logout revokes that browser session but leaves the miner and Twitch session running.
+- Changing the admin password revokes all active web browser sessions.
+- Prefer localhost with Tailscale Serve or an HTTPS reverse proxy over direct public exposure.
+- Never post logs or settings until secrets have been removed.
+
+## Uninstall
+
+Stop and remove a Linux Web UI installation while keeping data for a later reinstall:
 
 ```sh
 sudo systemctl disable --now tdminer-web.service
 sudo rm -f /etc/systemd/system/tdminer-web.service
 sudo systemctl daemon-reload
-rm -f ~/.local/bin/tdminer-web
+rm -f ~/.local/bin/tdminer-web ~/.local/bin/tdminer
 rm -rf ~/.local/share/tdminer/releases ~/.local/share/tdminer/current
 rm -f ~/.local/share/tdminer/install-mode ~/.local/share/tdminer/web-host
 ```
 
-If the installer opened port `17473` in UFW, remove that rule too:
+If the installer opened UFW port `17473`, remove the rule:
 
 ```sh
 sudo ufw delete allow 17473/tcp
 ```
 
-For a complete uninstall, including the Twitch cookie jar, settings, web password, recovery data, and browser sessions, also run:
+Delete all settings, web credentials, and the Twitch session only when you no longer need them:
 
 ```sh
 rm -rf ~/.local/share/tdminer
 ```
 
-The last command permanently deletes all DropForge data. If `TDMINER_INSTALL_DIR` or `TDMINER_APP_DIR` was customized during installation, use those paths instead.
+This last command cannot be undone. Adjust the paths if `TDMINER_INSTALL_DIR` or `TDMINER_APP_DIR` was customized.
 
-Passwords and recovery codes are salted and hashed with scrypt. Session cookies are opaque, HttpOnly, and cleared on website logout. Website logout does not stop mining or clear the Twitch cookie jar. Binding to `0.0.0.0` uses HTTP, so use it only on a trusted network; localhost plus Tailscale Serve is recommended for private HTTPS remote access.
+## Run from source
 
-macOS terminal install uses the same command and installs the latest release asset.
+Python 3.10 or newer is required.
 
-Custom install location:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/HimanM/TwitchDropsMiner/main/scripts/install.sh | TDMINER_INSTALL_DIR="$HOME/bin" sh
-```
-
-Termux:
+### Linux and macOS
 
 ```sh
-pkg install python clang curl tar
-curl -fsSL https://raw.githubusercontent.com/HimanM/TwitchDropsMiner/main/scripts/install.sh | sh
-```
-
-Native Termux cannot run the Linux release binary because Android does not use glibc Linux executables. On Termux, the installer downloads the source, creates a Python virtual environment in `~/.local/share/tdminer`, installs dependencies, and creates a `tdminer` launcher in `$PREFIX/bin`.
-
-## Running
-
-Automatic terminal frontend:
-
-```sh
-tdminer
-```
-
-Textual TUI:
-
-```sh
-tdminer tui
-```
-
-Portable CLI:
-
-```sh
-tdminer cli
-```
-
-Verbose logs:
-
-```sh
-tdminer cli --log -vv
-```
-
-Before the first terminal run, import a Twitch browser session:
-
-```sh
-tdminer --import-token
-```
-
-Paste only the `auth-token` cookie value when prompted, then start `tdminer` normally. If Twitch later rejects the saved authorization, DropForge removes that invalid token and asks for a replacement instead of terminating.
-
-## CLI Commands
-
-The portable CLI has a boxed command input with slash-command autocomplete.
-
-Type `/` to list commands. Type `/priority add `, `/exclude add `, or `/switch ` to autocomplete available games and channels.
-
-Type `/help` in the CLI to view all commands grouped by category with descriptions.
-
-### Navigation
-
-| Command | Description |
-|---------|-------------|
-| `/dashboard` | Switch to the dashboard view (default) |
-| `/channels` | Switch to the channels list view |
-| `/channels next` | Page forward in the channels list |
-| `/channels prev` | Page backward in the channels list |
-| `/drops` | Switch to the drops/campaigns view |
-| `/drops next` | Page forward in the drops list |
-| `/drops prev` | Page backward in the drops list |
-| `/settings` | Switch to the settings view |
-| `/logs` | Switch to the logs view |
-| `/help` | Show the help page (use `/help <topic>` for details) |
-
-### Control
-
-| Command | Description |
-|---------|-------------|
-| `/reload` | Reload inventory and campaign data from Twitch |
-| `/switch <channel>` | Switch to a specific channel by name or ID |
-| `/priority add <game>` | Add a game to the priority list |
-| `/priority remove <game>` | Remove a game from the priority list |
-| `/priority bump <game>` | Move a game up in the priority list |
-| `/priority demote <game>` | Move a game down in the priority list |
-| `/exclude add <game>` | Add a game to the exclude list |
-| `/exclude remove <game>` | Remove a game from the exclude list |
-| `/mode <mode>` | Set priority mode: `priority-only`, `ending-soonest`, `low-availability` |
-| `/filter <name> <on\|off>` | Toggle filters: `not-linked`, `upcoming`, `expired`, `excluded`, `finished` |
-| `/farm-unlinked on\|off` | Enable/disable farming unlinked drops (priority-only mode) |
-| `/badges on\|off` | Include badge and emote campaigns in normal farming |
-| `/auto-badges on\|off` | Farm free watch-time badges only when priority work is idle |
-
-### System
-
-| Command | Description |
-|---------|-------------|
-| `/open` | Open the Twitch login URL in a browser (when login is pending) |
-| `/copy` | Show the Twitch login URL (when login is pending) |
-| `/detach` | Detach from current tmux session (keeps miner running) |
-| `/quit` | Exit the application |
-
-## TUI Shortcuts
-
-```text
-q  quit
-r  reload inventory/campaign data
-s  switch to the selected channel
-b  open Twitch when login is pending (legacy terminal shortcut)
-c  copy a pending Twitch URL when available (legacy terminal shortcut)
-```
-
-## Settings Notes
-
-- Priority mode controls how games are selected.
-- Farm unlinked drops only works in priority-only mode.
-- Auto-farm free badges is off by default. Priority work always wins, and completed badges are remembered across updates.
-- Priority and exclude changes require an inventory reload before they affect channel selection.
-- Link Twitch campaigns to game accounts on https://www.twitch.tv/drops/campaigns when required by the campaign.
-
-## Security Notes
-
-- `cookies.jar` stores your Twitch session. Keep it private.
-- Importing a browser token reuses that Twitch session. Logging out of Twitch or revoking the session invalidates every copy.
-- Avoid watching Twitch in a browser with the same account while the miner is active, because Twitch may report progress inconsistently.
-
-## Source Run
-
-Python 3.10+ is required.
-
-```sh
-python -m venv .venv
+git clone https://github.com/HimanM/DropForge.git
+cd DropForge
+python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install -r requirements-tui.txt
-python tdminer.py cli
+python tdminer.py --import-token
+python tdminer.py tui
 ```
 
-On Windows PowerShell:
+### Windows PowerShell
 
 ```powershell
+git clone https://github.com/HimanM/DropForge.git
+Set-Location DropForge
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements-tui.txt
-python tdminer.py cli
+python -m pip install -r requirements.txt
+python main.py
 ```
 
-## Build Notes
+For the portable Windows CLI, install `requirements-tui.txt` and run `python tdminer.py cli`.
 
-- Desktop GUI builds are packaged as DropForge applications.
-- `tdminer` release binaries are built with PyInstaller.
-- Linux release binaries require compatible glibc Linux systems.
-- Termux uses source install instead of release binaries.
-- For full build and deployment instructions across all platforms, see [DEPLOY.md](DEPLOY.md).
+## Build and deployment
+
+GitHub Actions builds the Windows and macOS GUI, Linux GUI and AppImage packages for `x86_64` and `aarch64`, terminal binaries, install script artifact, and the GHCR image. See [DEPLOY.md](DEPLOY.md) for source-build prerequisites and packaging details.
 
 ## Credits
 
-This fork is maintained by HimanM.
+DropForge is maintained by [HimanM](https://github.com/HimanM).
 
-The original Twitch Drops Miner project was created by DevilXD, with contributions from its community.
+The original Twitch Drops Miner was created by [DevilXD](https://github.com/DevilXD/TwitchDropsMiner) with contributions from its community.
