@@ -16,4 +16,5 @@ __pycache__
 cookies.jar
 cookies.jar.backup
 settings.json
-web-auth.sqlite3
+web-auth.sqlite3*
+web-device-session.json*

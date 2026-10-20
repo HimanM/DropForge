@@ -222,7 +222,15 @@ if [ "$os" = "Linux" ]; then
     echo "DropForge currently requires a systemd-based Linux server." >&2
     exit 1
   fi
-  install_campaign_browser
+  case "${TDMINER_INSTALL_BROWSER:-0}" in
+    0|1) ;;
+    *) echo "TDMINER_INSTALL_BROWSER must be 0 or 1." >&2; exit 1 ;;
+  esac
+  if [ "$INSTALL_MODE" = "cli" ] || [ "${TDMINER_INSTALL_BROWSER:-0}" = "1" ]; then
+    install_campaign_browser
+  else
+    echo "Skipping browser installation. Use Device login in the Web UI for browser-free mining."
+  fi
 
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT

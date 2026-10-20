@@ -15,6 +15,7 @@ export type Drop = {
   current_minutes: number
   required_minutes: number
   claimed: boolean
+  claim_pending?: boolean
   earned: boolean
   claimable: boolean
   starts: string
@@ -83,6 +84,7 @@ export type NotificationSettings = {
 }
 
 export type MinerState = {
+  login_method?: "browser" | "device"
   status: string
   icon_state: string
   miner: { running: boolean; last_error: string }

@@ -18,6 +18,8 @@ log.txt
 /dump.dat
 /lock.file
 settings.json
+/web-device-session.json
+/web-auth.sqlite3*
 /lang/English.json
 # AppImage
 /AppDir

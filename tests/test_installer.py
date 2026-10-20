@@ -3,6 +3,11 @@ import unittest
 
 
 class InstallerTests(unittest.TestCase):
+    def test_web_browser_installation_is_opt_in(self) -> None:
+        script = (Path(__file__).parents[1] / "scripts" / "install.sh").read_text(encoding="utf8")
+        self.assertIn('if [ "$INSTALL_MODE" = "cli" ] || [ "${TDMINER_INSTALL_BROWSER:-0}" = "1" ]; then', script)
+        self.assertIn("Skipping browser installation", script)
+
     def test_web_bind_policy_defaults_to_localhost(self) -> None:
         script = (Path(__file__).parents[1] / "scripts" / "install.sh").read_text(encoding="utf8")
         self.assertIn('[ -n "$HOST" ] || HOST="127.0.0.1"', script)

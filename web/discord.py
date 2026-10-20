@@ -381,19 +381,23 @@ class DiscordNotifier:
 
     def _claimed_payload(self, drop: TimedDrop) -> dict[str, Any]:
         campaign = drop.campaign
+        receipts = getattr(getattr(campaign, "_twitch", None), "pending_claims", None)
+        pending = receipts is not None and receipts.pending(drop)
         reward = ", ".join(benefit.name for benefit in drop.benefits) or drop.name
         thumbnail = next((_image(benefit.image_url) for benefit in drop.benefits if _image(benefit.image_url)), None)
         title = (
             "Free badge earned"
             if drop.is_free_badge
-            else "Drop claimed" if drop.is_claimed else "Drop earned"
+            else "Drop claimed" if drop.is_claimed and not pending else "Drop earned"
         )
         fields = [
             ("Category", campaign.game.name),
             ("Campaign", campaign.name),
             ("Campaign progress", f"{campaign.completed_drops}/{campaign.total_drops} Drops earned"),
         ]
-        if not drop.is_claimed:
+        if pending:
+            fields.append(("Delivery", "Claim accepted; awaiting Twitch confirmation. Link your game account if required."))
+        elif not drop.is_claimed:
             fields.append(
                 ("Delivery", "Watch requirement complete. Link or claim it in Twitch if required.")
             )

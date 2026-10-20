@@ -127,13 +127,16 @@ class WebManager(TUIManager):
 
     @staticmethod
     def _drop(drop: TimedDrop) -> dict[str, Any]:
+        receipts = getattr(drop.campaign._twitch, "pending_claims", None)
+        pending = receipts is not None and receipts.pending(drop)
         return {
             "id": drop.id,
             "name": drop.name,
             "progress": drop.progress,
             "current_minutes": drop.current_minutes,
             "required_minutes": drop.required_minutes,
-            "claimed": drop.is_claimed,
+            "claimed": drop.is_claimed and not pending,
+            "claim_pending": pending,
             "earned": drop.is_earned,
             "claimable": drop.can_claim,
             "starts": drop.starts_at.isoformat(),

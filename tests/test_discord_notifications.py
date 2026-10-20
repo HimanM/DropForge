@@ -61,6 +61,21 @@ class DiscordNotificationTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
+    def test_pending_claim_is_not_reported_as_confirmed_delivery(self) -> None:
+        selected = campaign()
+        selected._twitch = SimpleNamespace(pending_claims=SimpleNamespace(pending=lambda _: True))
+        drop = selected.drops[0]
+        drop.is_claimed = True
+        drop.is_earned = True
+        self.notifier.drop_updated(drop, ["Priority Game"])
+        message = self.payloads[0]["embeds"][0]
+        self.assertEqual(message["title"], "Drop earned")
+        self.assertIn("awaiting Twitch confirmation", str(message["fields"]))
+        restarted = DiscordNotifier(self.store)
+        restarted._schedule = self.payloads.append
+        restarted.drop_updated(drop, ["Priority Game"])
+        self.assertEqual(len(self.payloads), 1)
+
     def test_url_is_restricted_and_secret_is_not_returned(self) -> None:
         self.assertEqual(validate_webhook_url(WEBHOOK), WEBHOOK)
         with self.assertRaises(ValueError):

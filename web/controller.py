@@ -9,19 +9,22 @@ from time import monotonic
 from typing import Any
 
 from core.constants import COOKIES_PATH, FILE_FORMATTER, LOCK_PATH, LOG_PATH
-from core.exceptions import CaptchaRequired
+from core.exceptions import CaptchaRequired, LoginException
 from core.settings import Settings
 from core.translate import _
 from core.utils import ExponentialBackoff, lock_file
 from network.twitch import import_auth_token
+from web.auth import AuthStore
 from web.catalog import WebTwitch
 from web.discord import DiscordNotifier
 from web.manager import WebManager
+from web.twitch_auth import DEVICE_SESSION_PATH
 
 
 class MinerController:
-    def __init__(self, notifier: DiscordNotifier | None = None) -> None:
+    def __init__(self, notifier: DiscordNotifier | None = None, store: AuthStore | None = None) -> None:
         self.notifier = notifier
+        self.store = store
         self.manager: WebManager | None = None
         self._client: WebTwitch | None = None
         self._task: asyncio.Task[None] | None = None
@@ -68,6 +71,10 @@ class MinerController:
             await self.stop(notify=False)
 
     async def reset_auth(self) -> bool:
+        if self.login_method == "device":
+            await self.stop(notify=False)
+            DEVICE_SESSION_PATH.unlink(missing_ok=True)
+            return await self.start()
         if self.running:
             if self.manager is None:
                 return False
@@ -81,10 +88,26 @@ class MinerController:
         if was_running:
             await self.stop(notify=False)
         try:
-            return await import_auth_token(token, verify_campaign_access=False)
+            result = await import_auth_token(token, verify_campaign_access=False)
+            if self.store is not None:
+                self.store.update_settings({"twitch_login_method": "browser"})
+            return result
         finally:
             if was_running:
                 await self.start()
+
+    @property
+    def login_method(self) -> str:
+        if self.store is None:
+            return "browser"
+        return self.store.get_settings({"twitch_login_method": "browser"})["twitch_login_method"]
+
+    async def use_device_login(self) -> None:
+        if self.store is None:
+            raise ValueError("Web authentication storage is unavailable.")
+        await self.stop(notify=False)
+        self.store.update_settings({"twitch_login_method": "device"})
+        await self.start()
 
     async def _run(self) -> None:
         backoff = ExponentialBackoff(variance=0, maximum=60)
@@ -140,6 +163,8 @@ class MinerController:
             client = WebTwitch(
                 settings,
                 gui_factory=lambda twitch: WebManager(twitch, self.notifier),
+                browser_free=self.login_method == "device",
+                store=self.store,
             )
             self._client = client
             self.manager = client.gui
@@ -156,6 +181,11 @@ class MinerController:
                 self.notifier.operational("Twitch verification required", self.last_error)
         except asyncio.CancelledError:
             raise
+        except LoginException as exc:
+            restart = True
+            self.last_error = str(exc)
+            if self._client is not None:
+                self._client.print(f"Twitch login unavailable: {exc}")
         except Exception:
             restart = True
             self.last_error = traceback.format_exc()
@@ -193,6 +223,7 @@ class MinerController:
         state["notifications"] = self.notifier.snapshot() if self.notifier is not None else {}
         return {
             **state,
+            "login_method": self.login_method,
             "miner": {
                 "running": self.running,
                 "last_error": self.last_error,

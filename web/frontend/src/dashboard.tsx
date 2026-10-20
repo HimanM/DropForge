@@ -212,6 +212,10 @@ export function Dashboard({ session, onSignedOut }: Props) {
     if (await runAction("invalidate", "/api/miner/invalidate-auth")) setTab("overview")
   }
 
+  async function deviceLogin() {
+    if (await runAction("device-login", "/api/twitch/device-login")) setTab("overview")
+  }
+
   async function importTwitch(token: string) {
     setBusy("import-token")
     setError("")
@@ -377,10 +381,14 @@ export function Dashboard({ session, onSignedOut }: Props) {
                 <section className="rounded-2xl border border-orange-500/25 bg-orange-500/8 p-5 sm:flex sm:items-center sm:justify-between sm:gap-6">
                   <div>
                     <p className="font-semibold">Connect Twitch</p>
-                    <p className="mt-1 text-sm text-muted-foreground">Import the <code>auth-token</code> cookie from a browser signed in to Twitch.</p>
+                    {state.login.user_code ? (
+                      <p className="mt-1 text-sm text-muted-foreground">Open Twitch on any device and enter <strong className="select-all font-mono text-lg tracking-widest text-foreground">{state.login.user_code}</strong>. This server does not need a browser.</p>
+                    ) : <p className="mt-1 text-sm text-muted-foreground">Use a device code for browser-free servers, or import a browser session.</p>}
+                    <p className="mt-1 text-xs text-muted-foreground" role="status">{state.login.status}</p>
                   </div>
                   <div className="mt-4 flex shrink-0 flex-wrap gap-2 sm:mt-0">
-                    <a className="inline-flex h-9 items-center gap-2 rounded-lg border border-input bg-background px-3 text-sm font-medium" href="https://www.twitch.tv/drops/campaigns" rel="noreferrer" target="_blank">Open Twitch<LinkSimpleIcon /></a>
+                    {state.login.user_code && <a className="inline-flex h-9 items-center gap-2 rounded-lg border border-input bg-background px-3 text-sm font-medium" href={state.login.activation_url} rel="noreferrer" target="_blank">Activate on Twitch<LinkSimpleIcon /></a>}
+                    {state.login_method !== "device" && <DeviceLoginDialog busy={!!busy} onConfirm={deviceLogin} />}
                     <ImportTokenDialog busy={busy === "import-token"} onImport={importTwitch} />
                   </div>
                 </section>
@@ -414,7 +422,7 @@ export function Dashboard({ session, onSignedOut }: Props) {
         <TabsContent value="campaigns" className="min-h-0 overflow-hidden pt-5"><Campaigns campaigns={state.campaigns} /></TabsContent>
         <TabsContent value="channels" className="min-h-0 overflow-hidden pt-5"><Channels state={state} busy={busy} onSelect={(id) => runAction("channel", "/api/channels/select", { method: "POST", body: JSON.stringify({ channel_id: id }) })} /></TabsContent>
         <TabsContent value="games" className="min-h-0 overflow-hidden pt-5"><GameRules draft={settingsDraft} dirty={settingsDirty} busy={busy} onChange={changeSetting} onSave={saveSettings} /></TabsContent>
-        <TabsContent value="settings" className="min-h-0 overflow-hidden pt-5"><SettingsPanel draft={settingsDraft} dirty={settingsDirty} busy={busy} session={session} notifications={state.notifications} notificationDraft={notificationDraft} notificationDirty={notificationDirty} notificationMessage={notificationMessage} onSignedOut={onSignedOut} onChange={changeSetting} onNotificationChange={changeNotification} onSave={saveSettings} onSaveNotifications={saveNotifications} onTestNotifications={testNotifications} onRemoveNotifications={removeNotifications} onInvalidate={resetTwitch} onImport={importTwitch} /></TabsContent>
+        <TabsContent value="settings" className="min-h-0 overflow-hidden pt-5"><SettingsPanel draft={settingsDraft} dirty={settingsDirty} busy={busy} session={session} notifications={state.notifications} notificationDraft={notificationDraft} notificationDirty={notificationDirty} notificationMessage={notificationMessage} onSignedOut={onSignedOut} onChange={changeSetting} onNotificationChange={changeNotification} onSave={saveSettings} onSaveNotifications={saveNotifications} onTestNotifications={testNotifications} onRemoveNotifications={removeNotifications} onInvalidate={resetTwitch} onImport={importTwitch} onDeviceLogin={deviceLogin} /></TabsContent>
         <TabsContent value="logs" className="min-h-0 overflow-hidden pt-5"><Logs logs={state.logs} /></TabsContent>
       </Tabs>
 
@@ -467,7 +475,7 @@ function CampaignCard({ campaign }: { campaign: Campaign }) {
       <div className="flex items-start justify-between gap-4"><div className="min-w-0"><p className="truncate text-sm font-semibold">{campaign.game}</p><h2 className="mt-1 line-clamp-2 text-base leading-snug text-muted-foreground">{campaign.name}</h2></div><Badge variant="secondary" className={statusTone(campaign.status)}>{campaign.status}</Badge></div>
       <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground"><span className="flex items-center gap-1.5"><ClockIcon />Ends {new Date(campaign.ends).toLocaleDateString()}</span><span className={campaign.linked || campaign.eligible ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}>{campaign.linked ? "Account linked" : campaign.eligible ? "Farming without link" : "Link required"}</span></div>
       <Progress className="mt-5" value={campaign.progress * 100}><ProgressLabel>Progress</ProgressLabel><span className="ml-auto text-sm tabular-nums text-muted-foreground">{percent(campaign.progress)}</span></Progress>
-      <div className="scrollbar-theme mt-5 flex gap-2 overflow-x-auto pb-2">{campaign.drops.flatMap((drop) => drop.benefits.map((benefit) => <div key={`${drop.id}-${benefit.id || benefit.name}`} className="min-w-28 rounded-xl bg-muted p-2"><img className="aspect-square w-full rounded-lg object-cover" src={benefit.image_url} alt={benefit.name} loading="lazy" /><p className="mt-2 line-clamp-2 text-[11px] font-medium leading-snug">{benefit.name}</p><p className="mt-1 text-[10px] text-muted-foreground">{drop.claimed ? "Claimed" : drop.earned ? "Earned · link to receive" : `${drop.current_minutes}/${drop.required_minutes} min`}</p></div>))}</div>
+      <div className="scrollbar-theme mt-5 flex gap-2 overflow-x-auto pb-2">{campaign.drops.flatMap((drop) => drop.benefits.map((benefit) => <div key={`${drop.id}-${benefit.id || benefit.name}`} className="min-w-28 rounded-xl bg-muted p-2"><img className="aspect-square w-full rounded-lg object-cover" src={benefit.image_url} alt={benefit.name} loading="lazy" /><p className="mt-2 line-clamp-2 text-[11px] font-medium leading-snug">{benefit.name}</p><p className="mt-1 text-[10px] text-muted-foreground">{drop.claim_pending ? campaign.linked ? "Claim pending confirmation" : "Earned · link to receive" : drop.claimed ? "Claimed" : drop.earned ? campaign.linked ? "Earned · awaiting claim" : "Earned · link to receive" : `${drop.current_minutes}/${drop.required_minutes} min`}</p></div>))}</div>
       {!campaign.linked && campaign.link_url && <a className="mt-4 inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline" href={campaign.link_url} rel="noreferrer" target="_blank">Link to receive rewards<LinkSimpleIcon /></a>}
     </div>
   </article>
@@ -518,7 +526,7 @@ function SaveActions({ dirty, busy, onSave }: { dirty: boolean; busy: string; on
   return <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={!dirty || saving} onClick={() => onSave(false)}><FloppyDiskIcon />{busy === "settings" ? "Saving" : "Save"}</Button><Button disabled={saving} onClick={() => onSave(true)}><ArrowsClockwiseIcon />{busy === "settings-reload" ? "Saving and reloading" : "Save and reload"}</Button></div>
 }
 
-function SettingsPanel({ draft, dirty, busy, session, notifications, notificationDraft, notificationDirty, notificationMessage, onChange, onNotificationChange, onSave, onSaveNotifications, onTestNotifications, onRemoveNotifications, onInvalidate, onImport, onSignedOut }: { draft: Partial<Settings>; dirty: boolean; busy: string; session: SessionMeta; notifications: Partial<NotificationSettings>; notificationDraft: NotificationDraft; notificationDirty: boolean; notificationMessage: string; onChange: SettingsChange; onNotificationChange: NotificationChange; onSave: (reload: boolean) => void; onSaveNotifications: () => void; onTestNotifications: () => void; onRemoveNotifications: () => void; onInvalidate: () => void; onImport: (token: string) => Promise<boolean>; onSignedOut: () => void }) {
+function SettingsPanel({ draft, dirty, busy, session, notifications, notificationDraft, notificationDirty, notificationMessage, onChange, onNotificationChange, onSave, onSaveNotifications, onTestNotifications, onRemoveNotifications, onInvalidate, onImport, onDeviceLogin, onSignedOut }: { draft: Partial<Settings>; dirty: boolean; busy: string; session: SessionMeta; notifications: Partial<NotificationSettings>; notificationDraft: NotificationDraft; notificationDirty: boolean; notificationMessage: string; onChange: SettingsChange; onNotificationChange: NotificationChange; onSave: (reload: boolean) => void; onSaveNotifications: () => void; onTestNotifications: () => void; onRemoveNotifications: () => void; onInvalidate: () => void; onImport: (token: string) => Promise<boolean>; onDeviceLogin: () => void; onSignedOut: () => void }) {
   const priorityOnly = draft.priority_mode === PRIORITY_ONLY
   const setPriorityMode = (value: string) => { onChange("priority_mode", value); if (value !== PRIORITY_ONLY) onChange("farm_unlinked", false) }
 
@@ -555,8 +563,8 @@ function SettingsPanel({ draft, dirty, busy, session, notifications, notificatio
         </div>
       </SettingsGroup>
       <SettingsGroup title="Security" icon={<KeyIcon />}>
-        <p className="text-sm leading-relaxed text-muted-foreground">Changing the admin password revokes every browser session. Invalidating Twitch auth removes the saved Twitch token and pauses mining until another browser token is imported.</p>
-        <div className="flex flex-wrap gap-2"><PasswordDialog session={session} onSignedOut={onSignedOut} /><ImportTokenDialog busy={busy === "import-token"} onImport={onImport} /><ResetTwitchDialog busy={busy === "invalidate"} onConfirm={onInvalidate} /></div>
+        <p className="text-sm leading-relaxed text-muted-foreground">Device login needs no Chromium or desktop helper on this server. Saved sessions survive updates; if Twitch revokes a device session, activate a new code. Browser token import remains available and may need Chromium. Website logout does not stop mining.</p>
+        <div className="flex flex-wrap gap-2"><PasswordDialog session={session} onSignedOut={onSignedOut} /><DeviceLoginDialog busy={!!busy} onConfirm={onDeviceLogin} /><ImportTokenDialog busy={busy === "import-token"} onImport={onImport} /><ResetTwitchDialog busy={busy === "invalidate"} onConfirm={onInvalidate} /></div>
       </SettingsGroup>
     </div>
   </PageFrame>
@@ -578,7 +586,11 @@ function PasswordDialog({ session, onSignedOut }: { session: SessionMeta; onSign
 }
 
 function ResetTwitchDialog({ busy, onConfirm }: { busy: boolean; onConfirm: () => void }) {
-  return <Dialog><DialogTrigger render={<Button variant="destructive" disabled={busy} />}>Reset Twitch login</DialogTrigger><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Reset Twitch login?</DialogTitle><DialogDescription>This removes the saved Twitch authorization. Mining pauses until you import another browser auth-token.</DialogDescription></DialogHeader><DialogFooter><DialogClose render={<Button variant="outline" />}>Cancel</DialogClose><DialogClose render={<Button variant="destructive" onClick={onConfirm} />}>Reset Twitch login</DialogClose></DialogFooter></DialogContent></Dialog>
+  return <Dialog><DialogTrigger render={<Button variant="destructive" disabled={busy} />}>Reset Twitch login</DialogTrigger><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Reset Twitch login?</DialogTitle><DialogDescription>This removes the current login method's saved Twitch session. Device login will show a new activation code; browser login will require another token. This does not revoke your Twitch browser login.</DialogDescription></DialogHeader><DialogFooter><DialogClose render={<Button variant="outline" />}>Cancel</DialogClose><DialogClose render={<Button variant="destructive" onClick={onConfirm} />}>Reset Twitch login</DialogClose></DialogFooter></DialogContent></Dialog>
+}
+
+function DeviceLoginDialog({ busy, onConfirm }: { busy: boolean; onConfirm: () => void }) {
+  return <Dialog><DialogTrigger render={<Button variant="outline" disabled={busy} />}><KeyIcon />Device login</DialogTrigger><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Use browser-free Twitch login?</DialogTitle><DialogDescription>The miner will restart in device mode. Activate the code using Twitch on any phone or computer, then close that browser. No browser runs on this server. Your saved browser cookies are kept separately.</DialogDescription></DialogHeader><p className="text-sm leading-relaxed text-muted-foreground">If Twitch revokes this session, you must activate a new code. Automatic token renewal is not guaranteed.</p><DialogFooter><DialogClose render={<Button variant="outline" />}>Cancel</DialogClose><DialogClose render={<Button onClick={onConfirm} />}>Use device login</DialogClose></DialogFooter></DialogContent></Dialog>
 }
 
 function ImportTokenDialog({ busy, onImport }: { busy: boolean; onImport: (token: string) => Promise<boolean> }) {

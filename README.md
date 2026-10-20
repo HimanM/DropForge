@@ -112,7 +112,15 @@ printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> ~/.profile
 
 ### Connect Twitch
 
-Twitch retired the password endpoint used by older miners, and its device-code tokens may be rejected by the Drops API. DropForge imports a browser session instead and never asks for your Twitch password.
+For small Linux servers, choose **Device login** in Overview or Settings. Open the activation link on any phone or computer, enter the displayed code, and authorize Twitch for TV. You can close that browser afterward: no Chromium, desktop helper, VPN exit node, or ongoing connection to your PC is needed by the server.
+
+This is an optional, web-only login method. Campaign discovery uses the existing public catalogue; Twitch remains authoritative for watch progress and claim confirmation. Desktop GUI/TUI login is unchanged. Device credentials are stored separately in `web-device-session.json`, while browser cookies and settings are preserved across updates. The server checks the device token at startup and hourly and retains it through temporary connection failures.
+
+**Session lifetime:** the tested TV client advertises no scheduled expiry, but Twitch can revoke it. Automatic refresh is not guaranteed (Twitch currently requires a client secret for this client's refresh token). If activation is required again, open DropForge and approve a fresh code on any device. Reset Twitch login removes only the active login method's saved session; it does not revoke your Twitch website login.
+
+Web installs no longer install a browser by default. To use browser-token import instead, install Chrome/Chromium and Xvfb yourself, or rerun the installer with `TDMINER_INSTALL_BROWSER=1`. Existing browsers are not removed. Docker's standard image still bundles Chromium for browser-token compatibility; device mode does not launch it.
+
+Browser-token import remains available and never asks for your Twitch password:
 
 1. Sign in at [twitch.tv](https://www.twitch.tv/) on a desktop browser.
 2. Open the browser developer tools.
@@ -311,6 +319,7 @@ Important files include:
 | Path | Purpose |
 | --- | --- |
 | `cookies.jar` | Twitch session, keep private |
+| `web-device-session.json` | Web-only device session; keep private, survives updates |
 | `cookies.jar.backup` | Last recoverable Twitch session |
 | `settings.json` | Miner, priority, webhook, and interface settings |
 | `web-auth.sqlite3` | Hashed web credentials and browser sessions |
@@ -323,7 +332,7 @@ Back up the data directory or Docker volume while DropForge is stopped. Updates 
 
 - Web passwords and recovery codes are salted and hashed with scrypt.
 - Web session cookies are opaque and HttpOnly.
-- The Twitch `auth-token`, `cookies.jar`, recovery code, and Discord webhook URL are secrets.
+- The Twitch `auth-token`, `cookies.jar`, `web-device-session.json`, recovery code, and Discord webhook URL are secrets.
 - Website logout revokes that browser session but leaves the miner and Twitch session running.
 - Changing the admin password revokes all active web browser sessions.
 - Prefer localhost with Tailscale Serve or an HTTPS reverse proxy over direct public exposure.
