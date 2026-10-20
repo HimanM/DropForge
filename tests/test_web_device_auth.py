@@ -16,7 +16,9 @@ from web.auth import AuthStore
 from web.catalog import WebTwitch
 from web.claims import PendingClaims
 from web.controller import MinerController
+from web.manager import WebLogin
 from web.server import create_app
+from tui.state import TUIState
 from web.twitch_auth import TV_CLIENT, WebDeviceAuth
 
 
@@ -87,6 +89,7 @@ class DeviceAuthTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_only_oauth_401_requests_new_activation(self):
         self.save_session()
+        self.client.gui.notifier = Mock()
         new_token = TOKEN + "_replacement"
         self.auth._json = AsyncMock(side_effect=[(401, {}), (200, self.identity)])
         self.auth._oauth_login = AsyncMock(return_value=new_token)
@@ -94,7 +97,22 @@ class DeviceAuthTests(unittest.IsolatedAsyncioTestCase):
         self.auth._oauth_login.assert_awaited_once()
         self.client.stop_watching.assert_called_once()
         self.client.change_state.assert_called_once()
+        self.client.gui.notifier.auth_issue.assert_called_once()
+        self.assertEqual(self.client.gui.notifier.auth_issue.call_args.args[0], "expired")
         self.assertEqual(json.loads(self.path.read_text())["access_token"], new_token)
+
+    async def test_login_success_clears_warning_but_not_query_permission_warning(self):
+        notifier = Mock()
+        notifier.auth_alert.return_value = {"kind": "expired"}
+        manager = SimpleNamespace(notifier=notifier, state=TUIState(), refresh_login=Mock())
+        login = WebLogin(manager)
+        login.update("Logged in", 123)
+        notifier.auth_recovered.assert_called_once()
+        notifier.auth_recovered.reset_mock()
+        for kind in ("permissions", "verification", "login_error"):
+            notifier.auth_alert.return_value = {"kind": kind}
+            login.update("Logged in", 123)
+            notifier.auth_recovered.assert_not_called()
 
     async def test_outage_keeps_session_and_recovers(self):
         self.save_session()

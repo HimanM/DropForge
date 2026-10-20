@@ -81,10 +81,12 @@ export type NotificationSettings = {
   notify_new_drops: boolean
   notify_status: boolean
   notify_operational: boolean
+  notify_auth: boolean
 }
 
 export type MinerState = {
   login_method?: "browser" | "device"
+  auth_alert?: { kind?: string; message?: string; requires_login?: boolean; since?: number }
   status: string
   icon_state: string
   miner: { running: boolean; last_error: string }

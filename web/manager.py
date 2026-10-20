@@ -7,13 +7,26 @@ from yarl import URL
 
 from core.constants import LANG_PATH
 from core.translate import _
-from tui.manager import TUIChannels, TUIInventory, TUIManager
+from tui.manager import TUIChannels, TUIInventory, TUILogin, TUIManager
 
 if TYPE_CHECKING:
     from models.inventory import DropsCampaign, TimedDrop
     from models.channel import Channel
     from network.twitch import Twitch
     from web.discord import DiscordNotifier
+
+
+class WebLogin(TUILogin):
+    def update(self, status: str, user_id: int | None) -> None:
+        super().update(status, user_id)
+        notifier = self._manager.notifier
+        if user_id is not None and notifier is not None and notifier.auth_alert().get("kind") not in {"permissions", "verification", "login_error"}:
+            notifier.auth_recovered()
+
+    async def ask_auth_token(self) -> str:
+        if self._manager.notifier is not None:
+            self._manager.notifier.auth_issue("login_required", "The browser session needs authorization. Open DropForge to import a token or select Device login.")
+        return await super().ask_auth_token()
 
 
 class WebInventory(TUIInventory):
@@ -52,6 +65,7 @@ class WebManager(TUIManager):
     def __init__(self, twitch: Twitch, notifier: DiscordNotifier | None = None) -> None:
         super().__init__(twitch)
         self.notifier = notifier
+        self.login = WebLogin(self)
         self.inv = WebInventory(self)
         self.channels = WebChannels(self)
         self._selected_channel_id: str | None = None

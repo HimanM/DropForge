@@ -50,6 +50,11 @@ class WebDeviceAuth(_AuthState):
     async def get_integrity_token(self, *, force_refresh: bool = False) -> None:
         return None
 
+    def _alert(self, kind: str, message: str, *, requires_login: bool = True, notify: bool = True) -> None:
+        notifier = getattr(self._twitch.gui, "notifier", None)
+        if notifier is not None:
+            notifier.auth_issue(kind, message, requires_login=requires_login, notify=notify)
+
     def _load(self) -> dict:
         try:
             saved = json.loads(self.path.read_text(encoding="utf8"))
@@ -105,16 +110,16 @@ class WebDeviceAuth(_AuthState):
             except (aiohttp.ClientError, asyncio.TimeoutError):
                 pass
             self._twitch.print(f"Twitch authorization temporarily unavailable; retrying in {delay} seconds.")
+            self._alert("connection", "Cannot reach Twitch authorization. Retrying without clearing the saved session.",
+                        requires_login=False, notify=delay >= 8)
             await self._twitch.gui.coro_unless_closed(asyncio.sleep(delay))
             delay = min(delay * 2, 60)
 
     async def _oauth_login(self) -> str:
         gui = self._twitch.gui
         notifier = getattr(gui, "notifier", None)
-        if notifier is not None:
-            notifier.operational("Twitch activation required",
-                                 "Open DropForge and activate the device code. No server browser is required.",
-                                 event_key="device-login-required")
+        if notifier is not None and not notifier.auth_alert().get("requires_login"):
+            self._alert("login_required", "Activate a Twitch device code in DropForge. No server browser is required.")
         while True:
             gui.status.update("Waiting for Twitch activation")
             status, device = await self._json("POST", "device", data={
@@ -168,6 +173,7 @@ class WebDeviceAuth(_AuthState):
                 self.path.unlink(missing_ok=True)
                 self._twitch.gui.login.update("Twitch activation required", None)
                 self._twitch.print("The web device session is no longer valid; a new activation is required.")
+                self._alert("expired", "Twitch expired or revoked the device session. Mining is paused until you activate a new code.")
                 self.device_id, self.session_id = uuid4().hex, uuid4().hex
                 token = None
                 continue

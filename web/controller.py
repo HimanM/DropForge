@@ -9,7 +9,7 @@ from time import monotonic
 from typing import Any
 
 from core.constants import COOKIES_PATH, FILE_FORMATTER, LOCK_PATH, LOG_PATH
-from core.exceptions import CaptchaRequired, LoginException
+from core.exceptions import CaptchaRequired, GQLException, LoginException
 from core.settings import Settings
 from core.translate import _
 from core.utils import ExponentialBackoff, lock_file
@@ -178,7 +178,7 @@ class MinerController:
             if self._client is not None:
                 self._client.print(self.last_error)
             if self.notifier is not None:
-                self.notifier.operational("Twitch verification required", self.last_error)
+                self.notifier.auth_issue("verification", "Twitch requires login verification. Open DropForge to review the login method.")
         except asyncio.CancelledError:
             raise
         except LoginException as exc:
@@ -186,6 +186,15 @@ class MinerController:
             self.last_error = str(exc)
             if self._client is not None:
                 self._client.print(f"Twitch login unavailable: {exc}")
+            if self.notifier is not None:
+                self.notifier.auth_issue("login_error", "Twitch could not finish authorization. Open DropForge to review login and try again.")
+        except GQLException as exc:
+            restart = True
+            self.last_error = str(exc)
+            if self._client is not None:
+                self._client.print("Twitch rejected a GraphQL request; the engine will retry.")
+            if self.notifier is not None and any(marker in str(exc).lower() for marker in ("integrity", "unauthorized", "authorization")):
+                self.notifier.auth_issue("verification", "Twitch rejected session verification. Open DropForge to review login or use Device login.")
         except Exception:
             restart = True
             self.last_error = traceback.format_exc()
@@ -224,6 +233,7 @@ class MinerController:
         return {
             **state,
             "login_method": self.login_method,
+            "auth_alert": self.notifier.auth_alert() if self.notifier is not None else {},
             "miner": {
                 "running": self.running,
                 "last_error": self.last_error,

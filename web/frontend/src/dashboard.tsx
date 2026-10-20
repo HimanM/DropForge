@@ -63,7 +63,7 @@ type Props = {
 type Tab = "overview" | "campaigns" | "channels" | "games" | "settings" | "logs"
 
 type SettingsChange = <K extends keyof Settings>(key: K, value: Settings[K]) => void
-type NotificationDraft = Pick<NotificationSettings, "enabled" | "notify_claimed" | "notify_new_drops" | "notify_status" | "notify_operational"> & { webhook_url: string }
+type NotificationDraft = Pick<NotificationSettings, "enabled" | "notify_claimed" | "notify_new_drops" | "notify_status" | "notify_operational" | "notify_auth"> & { webhook_url: string }
 type NotificationChange = <K extends keyof NotificationDraft>(key: K, value: NotificationDraft[K]) => void
 
 const PRIORITY_ONLY = "Priority list only"
@@ -123,7 +123,7 @@ export function Dashboard({ session, onSignedOut }: Props) {
   const [error, setError] = useState("")
   const [settingsDraft, setSettingsDraft] = useState<Partial<Settings>>({})
   const [settingsDirty, setSettingsDirty] = useState(false)
-  const [notificationDraft, setNotificationDraft] = useState<NotificationDraft>({ enabled: false, notify_claimed: true, notify_new_drops: true, notify_status: true, notify_operational: false, webhook_url: "" })
+  const [notificationDraft, setNotificationDraft] = useState<NotificationDraft>({ enabled: false, notify_claimed: true, notify_new_drops: true, notify_status: true, notify_operational: false, notify_auth: true, webhook_url: "" })
   const [notificationDirty, setNotificationDirty] = useState(false)
   const [notificationMessage, setNotificationMessage] = useState("")
   const [theme, setTheme] = useState<"light" | "dark">(() => {
@@ -184,6 +184,7 @@ export function Dashboard({ session, onSignedOut }: Props) {
       notify_new_drops: state.notifications.notify_new_drops ?? true,
       notify_status: state.notifications.notify_status ?? true,
       notify_operational: Boolean(state.notifications.notify_operational),
+      notify_auth: state.notifications.notify_auth ?? true,
       webhook_url: "",
     })
   }, [notificationDirty, state.notifications])
@@ -344,6 +345,13 @@ export function Dashboard({ session, onSignedOut }: Props) {
         </div>
 
         {error && <div className="mt-4 flex shrink-0 items-start gap-2 rounded-xl border border-red-500/25 bg-red-500/8 p-3 text-sm text-red-700 dark:text-red-300" role="alert"><WarningIcon className="mt-0.5 shrink-0" />{error}</div>}
+
+        {state.auth_alert?.message && <div className="scrollbar-theme mt-3 flex max-h-36 shrink-0 flex-wrap items-center gap-3 overflow-y-auto rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm" role="alert">
+          <WarningIcon className="size-5 shrink-0 text-amber-600 dark:text-amber-400" />
+          <div className="min-w-0 flex-1"><p className="font-semibold">{state.auth_alert.requires_login ? "Twitch login needs attention" : "Twitch authentication issue"}</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">{state.auth_alert.message}</p></div>
+          <Button size="sm" variant="outline" onClick={async () => { setTab(state.auth_alert?.requires_login ? "overview" : "logs"); if (state.auth_alert?.requires_login && !state.miner.running) await runAction("start", "/api/miner/start") }}>{state.auth_alert.requires_login ? "Open login" : "View logs"}</Button>
+          {state.auth_alert.requires_login && state.login.activation_url && <a className="inline-flex h-7 items-center gap-1.5 rounded-lg bg-primary px-2.5 text-xs font-medium text-primary-foreground" href={state.login.activation_url} target="_blank" rel="noreferrer">Activate on Twitch<LinkSimpleIcon /></a>}
+        </div>}
 
         <TabsContent value="overview" className="scrollbar-theme min-h-0 overflow-y-auto py-5 pr-1">
           {loading ? <OverviewSkeleton /> : (
@@ -550,11 +558,12 @@ function SettingsPanel({ draft, dirty, busy, session, notifications, notificatio
           <div className="flex items-center justify-between gap-4"><div><p className="text-sm font-medium">{notifications.webhook_label || "Not configured"}</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">The saved token stays on this server and is never returned to the browser.</p></div><Badge variant="secondary" className={notifications.configured ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}>{notifications.configured ? "Configured" : "Not configured"}</Badge></div>
         </div>
         <Field label="Webhook URL" description="Paste an official Discord channel webhook. Saving a blank field keeps the existing URL."><Input type="password" autoComplete="off" value={notificationDraft.webhook_url} placeholder={notifications.configured ? "Saved webhook is hidden" : "https://discord.com/api/webhooks/..."} onChange={(event) => onNotificationChange("webhook_url", event.target.value)} /></Field>
-        <Toggle label="Enable notifications" description="Send messages only for categories in the priority list." checked={notificationDraft.enabled} onChange={(value) => onNotificationChange("enabled", value)} />
+        <Toggle label="Enable notifications" description="Drop and mining events follow the priority list. Auth and operational alerts are server-wide." checked={notificationDraft.enabled} onChange={(value) => onNotificationChange("enabled", value)} />
         <Toggle label="Earned Drops" description="Notify when watch requirements finish, including delivery status and reward art." checked={notificationDraft.notify_claimed} onChange={(value) => onNotificationChange("notify_claimed", value)} />
         <Toggle label="New priority Drops" description="Send one structured message when new rewards are detected." checked={notificationDraft.notify_new_drops} onChange={(value) => onNotificationChange("notify_new_drops", value)} />
         <Toggle label="Mining status" description="Report start, recovery, completion, and priority-channel problems." checked={notificationDraft.notify_status} onChange={(value) => onNotificationChange("notify_status", value)} />
         <Toggle label="Operational alerts" description="Optional global crash and Twitch verification alerts. These are not category-specific." checked={notificationDraft.notify_operational} onChange={(value) => onNotificationChange("notify_operational", value)} />
+        <Toggle label="Twitch authentication alerts" description="Notify when login expires, verification fails, or authorization cannot connect. Includes recovery messages; retries are deduplicated." checked={notificationDraft.notify_auth} onChange={(value) => onNotificationChange("notify_auth", value)} />
         {notificationMessage && <p className="text-sm text-emerald-600 dark:text-emerald-400" role="status">{notificationMessage}</p>}
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
           <Button disabled={!notificationDirty || busy.startsWith("notifications")} onClick={onSaveNotifications}><FloppyDiskIcon />{busy === "notifications" ? "Saving" : "Save webhook"}</Button>

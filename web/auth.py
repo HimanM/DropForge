@@ -265,3 +265,7 @@ class AuthStore:
                 (event_key, now),
             )
         return True
+
+    def forget_notification_event(self, event_key: str) -> None:
+        with self._db() as db:
+            db.execute("DELETE FROM notification_events WHERE event_key = ?", (event_key,))

@@ -285,6 +285,9 @@ class WebTwitch(Twitch):
             # Reuse the accepted receipt for an hour, not an invented inventory confirmation.
             return {"data": {"claimDropRewards": {"status": "ELIGIBLE_FOR_ALL"}}}
         result = await self._gql_request(ops)
+        notifier = getattr(self.gui, "notifier", None)
+        if notifier is not None and operation != GQL_QUERIES["Campaigns"]["operationName"] and notifier.auth_alert().get("kind") in {"permissions", "verification", "login_error"}:
+            notifier.auth_recovered()
         if self.pending_claims is not None:
             if operation == GQL_QUERIES["Inventory"]["operationName"]:
                 self.pending_claims.reconcile(result)
@@ -309,6 +312,10 @@ class WebTwitch(Twitch):
                         raise
                     await self.get_auth()
                     self.print(f"Twitch rejected a device-session query, but OAuth remains valid; retrying in {delay} seconds.")
+                    notifier = getattr(self.gui, "notifier", None)
+                    if notifier is not None:
+                        notifier.auth_issue("permissions", "Twitch rejected a Drops request while the OAuth session is valid. Retrying; resetting login is not yet necessary.",
+                                            requires_login=False, notify=delay >= 10)
                     await self.gui.coro_unless_closed(asyncio.sleep(delay))
                     delay = min(delay * 2, 60)
 

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from datetime import datetime, timedelta, timezone
+from time import time
 from typing import Any, TYPE_CHECKING
 from urllib.parse import urlsplit, urlunsplit
 
@@ -29,6 +31,7 @@ _DEFAULTS = {
     "discord_new_drops": "1",
     "discord_status": "1",
     "discord_operational": "0",
+    "discord_auth": "1",
     "discord_baseline": "0",
 }
 
@@ -83,6 +86,7 @@ class DiscordNotifier:
             "notify_new_drops": settings["discord_new_drops"] == "1",
             "notify_status": settings["discord_status"] == "1",
             "notify_operational": settings["discord_operational"] == "1",
+            "notify_auth": settings["discord_auth"] == "1",
         }
 
     def update(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -92,6 +96,7 @@ class DiscordNotifier:
             "notify_new_drops": "discord_new_drops",
             "notify_status": "discord_status",
             "notify_operational": "discord_operational",
+            "notify_auth": "discord_auth",
         }
         updates: dict[str, str | None] = {}
         if "webhook_url" in payload:
@@ -114,6 +119,9 @@ class DiscordNotifier:
         if next_enabled == "1" and not next_url:
             raise ValueError("Add a Discord webhook URL before enabling notifications.")
         self.store.update_settings(updates)
+        alert = self.auth_alert()
+        if alert and not alert.get("notified"):
+            self.auth_issue(alert["kind"], alert["message"], requires_login=alert["requires_login"])
         return self.snapshot()
 
     async def test(self) -> None:
@@ -267,6 +275,48 @@ class DiscordNotifier:
             )
         ):
             self._schedule(self._payload([self._embed(title, detail, _RED)]))
+
+    def auth_alert(self) -> dict[str, Any]:
+        try:
+            alert = json.loads(self.store.get_settings({"twitch_auth_alert": "{}"})["twitch_auth_alert"])
+            return alert if isinstance(alert, dict) else {}
+        except ValueError:
+            return {}
+
+    def auth_issue(self, kind: str, message: str, *, requires_login: bool = True, notify: bool = True) -> None:
+        previous = self.auth_alert()
+        if previous.get("requires_login") and not requires_login:
+            return
+        same = previous.get("kind") == kind
+        alert = {"kind": kind, "message": message, "requires_login": requires_login,
+                 "since": previous["since"] if same else int(time()),
+                 "notified": previous.get("notified", False) if same else False}
+        if notify and self._enabled("auth") and self.store.claim_notification_event(
+            f"discord:auth:{kind}", cooldown=6 * 60 * 60
+        ):
+            title = "Twitch login required" if requires_login else "Twitch authentication problem"
+            action = "Open DropForge through your SSH tunnel, then Overview to sign in." if requires_login else "Open DropForge Logs. Saved credentials are retained while the miner retries."
+            embed = self._embed(title, message, _RED, fields=[
+                ("Status", "Needs login" if requires_login else "Retrying automatically"),
+                ("Next action", action),
+            ])
+            embed["footer"] = {"text": "DropForge | Authentication"}
+            self._schedule(self._payload([embed]))
+            alert["notified"] = True
+        if alert != previous:
+            self.store.update_settings({"twitch_auth_alert": json.dumps(alert)})
+
+    def auth_recovered(self) -> None:
+        alert = self.auth_alert()
+        if not alert:
+            return
+        self.store.update_settings({"twitch_auth_alert": None})
+        self.store.forget_notification_event(f"discord:auth:{alert['kind']}")
+        if alert.get("notified") and self._enabled("auth"):
+            embed = self._embed("Twitch authentication restored",
+                                "DropForge authenticated successfully. Mining can resume without another login.", _GREEN)
+            embed["footer"] = {"text": "DropForge | Authentication"}
+            self._schedule(self._payload([embed]))
 
     def _enabled(self, event: str) -> bool:
         settings = self._settings()

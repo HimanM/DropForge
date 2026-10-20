@@ -61,6 +61,46 @@ class DiscordNotificationTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
+    def test_auth_alert_persists_and_is_deduplicated_until_recovery(self) -> None:
+        self.notifier.auth_issue("expired", "Twitch session expired. Activate again.")
+        self.notifier.auth_issue("expired", "Twitch session expired. Activate again.")
+        self.assertEqual(len(self.payloads), 1)
+        alert = DiscordNotifier(self.store).auth_alert()
+        self.assertTrue(alert["requires_login"])
+        self.assertTrue(alert["notified"])
+        embed = self.payloads[0]["embeds"][0]
+        self.assertEqual(embed["title"], "Twitch login required")
+        self.assertEqual(embed["footer"]["text"], "DropForge | Authentication")
+        restarted = DiscordNotifier(self.store)
+        restarted._schedule = self.payloads.append
+        restarted.auth_issue("expired", "Twitch session expired. Activate again.")
+        self.assertEqual(len(self.payloads), 1)
+        restarted.auth_recovered()
+        self.assertEqual(restarted.auth_alert(), {})
+        self.assertEqual(len(self.payloads), 2)
+        restarted.auth_issue("expired", "Another session expired.")
+        self.assertEqual(len(self.payloads), 3)
+
+    def test_auth_alert_opt_out_keeps_web_warning_without_discord(self) -> None:
+        self.notifier.update({"notify_auth": False})
+        self.notifier.auth_issue("expired", "Activate again.")
+        self.assertEqual(len(self.payloads), 0)
+        self.assertTrue(self.notifier.auth_alert()["requires_login"])
+        self.notifier.update({"notify_auth": True})
+        self.assertEqual(len(self.payloads), 1)
+
+    def test_brief_connection_warning_does_not_send_recovery_spam(self) -> None:
+        self.notifier.auth_issue("connection", "Retrying authorization.", requires_login=False, notify=False)
+        self.assertFalse(self.notifier.auth_alert()["requires_login"])
+        self.notifier.auth_recovered()
+        self.assertEqual(len(self.payloads), 0)
+
+    def test_connection_warning_does_not_replace_required_login(self) -> None:
+        self.notifier.auth_issue("expired", "Activate again.")
+        self.notifier.auth_issue("connection", "Retrying authorization.", requires_login=False)
+        self.assertEqual(self.notifier.auth_alert()["kind"], "expired")
+        self.assertEqual(len(self.payloads), 1)
+
     def test_pending_claim_is_not_reported_as_confirmed_delivery(self) -> None:
         selected = campaign()
         selected._twitch = SimpleNamespace(pending_claims=SimpleNamespace(pending=lambda _: True))
