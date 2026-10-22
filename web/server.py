@@ -304,6 +304,7 @@ def create_app(auth_path: Path, static_path: Path, *, auto_start: bool = True) -
                 "farm_unlinked",
                 "enable_badges_emotes",
                 "auto_farm_badges",
+                "skip_unfinishable_drops",
                 "trust_allowed_channels",
             ):
                 if key in body:

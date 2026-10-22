@@ -172,6 +172,7 @@ class GUISettingsAdvanced(TypedDict):
     warning_text: str
     enable_badges_emotes: str
     auto_farm_badges: str
+    skip_unfinishable_drops: str
     available_drops_check: str
     trust_allowed_channels: str
     farm_unlinked: str
@@ -388,6 +389,7 @@ default_translation: Translation = {
                 ),
                 "enable_badges_emotes": "Enable partial support for badges and emotes: ",
                 "auto_farm_badges": "Auto-farm free badges when idle: ",
+                "skip_unfinishable_drops": "Skip drops that cannot finish before expiry: ",
                 "available_drops_check": "Enable extra available drops check: ",
                 "trust_allowed_channels": "Trust explicitly allowed channels: ",
                 "farm_unlinked": "Farm unlinked drops: ",

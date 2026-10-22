@@ -1612,6 +1612,7 @@ class _SettingsVars(TypedDict):
     tray_notifications: IntVar
     enable_badges_emotes: IntVar
     auto_farm_badges: IntVar
+    skip_unfinishable_drops: IntVar
     available_drops_check: IntVar
     trust_allowed_channels: IntVar
     farm_unlinked: IntVar
@@ -1654,6 +1655,7 @@ class SettingsPanel:
             "auto_farm_badges": IntVar(
                 master, int(self._settings.auto_farm_badges)
             ),
+            "skip_unfinishable_drops": IntVar(master, int(self._settings.skip_unfinishable_drops)),
             "available_drops_check": IntVar(
                 master, int(self._settings.available_drops_check)
             ),
@@ -1798,6 +1800,13 @@ class SettingsPanel:
                 "auto_farm_badges",
                 bool(self._vars["auto_farm_badges"].get()),
             ),
+        ).grid(column=1, row=irow, sticky="w")
+        ttk.Label(
+            advanced_center, text=_("gui", "settings", "advanced", "skip_unfinishable_drops")
+        ).grid(column=0, row=(irow := irow + 1), sticky="e")
+        ttk.Checkbutton(
+            advanced_center, variable=self._vars["skip_unfinishable_drops"],
+            command=lambda: setattr(self._settings, "skip_unfinishable_drops", bool(self._vars["skip_unfinishable_drops"].get())),
         ).grid(column=1, row=irow, sticky="w")
         ttk.Label(
             advanced_center, text=_("gui", "settings", "advanced", "available_drops_check")
@@ -2917,6 +2926,7 @@ if __name__ == "__main__":
                 tray_notifications=True,
                 enable_badges_emotes=False,
                 auto_farm_badges=False,
+                skip_unfinishable_drops=False,
                 completed_badges=set(),
                 available_drops_check=False,
                 trust_allowed_channels=False,

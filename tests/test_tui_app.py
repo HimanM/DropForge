@@ -29,6 +29,7 @@ class TUIApplicationTests(unittest.IsolatedAsyncioTestCase):
             on_set_auto_farm_badges=callbacks.get(
                 "on_set_auto_farm_badges", lambda enabled: None
             ),
+            on_set_skip_unfinishable_drops=callbacks.get("on_set_skip_unfinishable_drops", lambda enabled: None),
             on_set_trust_allowed_channels=callbacks.get(
                 "on_set_trust_allowed_channels", lambda enabled: None
             ),
@@ -228,6 +229,7 @@ class TUIApplicationTests(unittest.IsolatedAsyncioTestCase):
         state.exclude = ["Game B"]
         state.farm_unlinked = True
         state.auto_farm_badges = True
+        state.skip_unfinishable_drops = True
         app = self.make_app(state)
 
         async with app.run_test(size=(100, 30)) as pilot:
@@ -238,6 +240,7 @@ class TUIApplicationTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(app.query_one("#farm-unlinked").is_mounted)
             self.assertTrue(app.query_one("#badges-emotes").is_mounted)
             self.assertTrue(app.query_one("#auto-farm-badges").value)
+            self.assertTrue(app.query_one("#skip-unfinishable-drops").value)
             self.assertEqual(app.query_one("#priority-table").row_count, 1)
             self.assertEqual(app.query_one("#exclude-table").row_count, 1)
 

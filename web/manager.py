@@ -91,6 +91,7 @@ class WebManager(TUIManager):
 
     def print(self, message: str) -> None:
         super().print(message)
+        print(message, flush=True)
         if self.notifier is not None and message == _("status", "no_channel"):
             self.notifier.idle(self)
         elif self.notifier is not None and message.startswith(
@@ -129,6 +130,8 @@ class WebManager(TUIManager):
             self._set_badges_emotes(payload["enable_badges_emotes"])
         if "auto_farm_badges" in payload:
             self._set_auto_farm_badges(payload["auto_farm_badges"])
+        if "skip_unfinishable_drops" in payload:
+            self._set_skip_unfinishable_drops(payload["skip_unfinishable_drops"])
         settings = self._twitch.settings
         restart_keys = {"proxy", "language", "connection_quality"}
         channel_keys = {"available_drops_check", "trust_allowed_channels"}
@@ -203,6 +206,7 @@ class WebManager(TUIManager):
                 "farm_unlinked": self.state.farm_unlinked,
                 "enable_badges_emotes": self.state.enable_badges_emotes,
                 "auto_farm_badges": self.state.auto_farm_badges,
+                "skip_unfinishable_drops": self.state.skip_unfinishable_drops,
                 "available_drops_check": bool(self._twitch.settings.available_drops_check),
                 "trust_allowed_channels": bool(
                     getattr(self._twitch.settings, "trust_allowed_channels", False)

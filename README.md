@@ -172,6 +172,15 @@ curl -fsSL https://raw.githubusercontent.com/HimanM/DropForge/main/scripts/insta
 | `tdminer-web reset-password` | Set a new admin password and revoke browser sessions |
 | `tdminer-web import-twitch-token` | Replace the saved Twitch session |
 
+The installer creates and enables **`tdminer-web.service`** automatically. Fresh web installs use browser-free device activation; updates retain the existing login method and session. Miner messages and server errors go to the system journal:
+
+```sh
+sudo systemctl status tdminer-web.service --no-pager
+sudo journalctl -u tdminer-web.service -f
+# Recent service logs:
+sudo journalctl -u tdminer-web.service -n 200 --no-pager
+```
+
 Logging out of the website clears only the web browser session. It does not stop the miner or sign the saved Twitch session out.
 
 ### Update
@@ -301,6 +310,7 @@ tdminer
 - **Trust allowed channels** follows Twitch campaign ACLs. Disable it only when Twitch shows a valid allowed channel but incorrectly marks it as ineligible.
 - **Badge and emote drops** includes those rewards in normal campaign selection.
 - **Auto-farm free badges** runs only when priority work is idle and skips subscription badges.
+- **Skip drops that cannot finish** (off by default) skips a reward when its remaining watch time exceeds the time before the earlier of its own or its campaign's expiry. It still farms other finishable rewards and never blocks completed claims. GUI: Advanced settings; TUI: Settings; CLI: `/skip-unfinishable on|off`; web: Settings → Mining. The estimate assumes one watch minute per real minute and can be affected by delayed Twitch progress.
 - **Priority and excluded games** are managed in the dedicated Games page or the desktop Settings tab.
 - Use **Save and reload** after selection changes so the active inventory is rebuilt immediately.
 - Discord Drop notifications follow priority categories. With **Auto-farm free badges** enabled, earned free badges and badge-fallback status are also reported outside the priority list; subscription badges and unrelated item Drops stay filtered out. **Earned Drops and badges** controls completion notifications.

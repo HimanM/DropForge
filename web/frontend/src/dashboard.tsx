@@ -49,6 +49,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Progress, ProgressLabel } from "@/components/ui/progress"
+import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -450,12 +451,13 @@ function OverviewSkeleton() {
   return <div className="space-y-7"><Skeleton className="h-[420px] rounded-2xl" /><div className="grid grid-cols-2 gap-5 sm:grid-cols-4">{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-16" />)}</div><div className="grid gap-5 lg:grid-cols-2"><Skeleton className="h-64 rounded-2xl" /><Skeleton className="h-64 rounded-2xl" /></div></div>
 }
 
-function PageFrame({ title, description, actions, children }: { title: string; description: string; actions?: ReactNode; children: ReactNode }) {
+function PageFrame({ title, description, actions, navigation, children }: { title: string; description: string; actions?: ReactNode; navigation?: ReactNode; children: ReactNode }) {
   return <section className="flex h-full min-h-0 flex-col">
     <div className="flex shrink-0 flex-col gap-4 pb-5 sm:flex-row sm:items-end sm:justify-between">
       <div><h1 className="text-2xl font-semibold tracking-[-0.03em]">{title}</h1><p className="mt-1 text-sm text-muted-foreground">{description}</p></div>
       {actions}
     </div>
+    {navigation}
     <div className="scrollbar-theme min-h-0 flex-1 overflow-y-auto overscroll-contain pb-6 pr-1">{children}</div>
   </section>
 }
@@ -533,24 +535,38 @@ function SaveActions({ dirty, busy, onSave }: { dirty: boolean; busy: string; on
 }
 
 function SettingsPanel({ draft, dirty, busy, session, notifications, notificationDraft, notificationDirty, notificationMessage, onChange, onNotificationChange, onSave, onSaveNotifications, onTestNotifications, onRemoveNotifications, onInvalidate, onImport, onDeviceLogin, onSignedOut }: { draft: Partial<Settings>; dirty: boolean; busy: string; session: SessionMeta; notifications: Partial<NotificationSettings>; notificationDraft: NotificationDraft; notificationDirty: boolean; notificationMessage: string; onChange: SettingsChange; onNotificationChange: NotificationChange; onSave: (reload: boolean) => void; onSaveNotifications: () => void; onTestNotifications: () => void; onRemoveNotifications: () => void; onInvalidate: () => void; onImport: (token: string) => Promise<boolean>; onDeviceLogin: () => void; onSignedOut: () => void }) {
+  const [section, setSection] = useState("mining")
   const priorityOnly = draft.priority_mode === PRIORITY_ONLY
   const setPriorityMode = (value: string) => { onChange("priority_mode", value); if (value !== PRIORITY_ONLY) onChange("farm_unlinked", false) }
+  const sections = [
+    { value: "mining", label: "Mining", icon: <ListChecksIcon /> },
+    { value: "connection", label: "Connection", icon: <GlobeIcon /> },
+    { value: "notifications", label: "Notifications", icon: <DiscordLogoIcon /> },
+    { value: "security", label: "Security", icon: <KeyIcon /> },
+  ]
+  const navigation = <TabsList aria-label="Settings sections" variant="line" className="mb-6 grid min-h-12 w-full shrink-0 grid-cols-4 justify-start border-b border-border p-0 sm:flex">{sections.map((item) => <TabsTrigger key={item.value} value={item.value} className="min-h-12 flex-none gap-2 px-1 text-xs data-active:text-primary after:bottom-[-1px] after:bg-primary sm:px-5 sm:text-sm"><span className="hidden sm:inline-flex">{item.icon}</span>{item.label}</TabsTrigger>)}</TabsList>
 
-  return <PageFrame title="Settings" description="Mining behavior, connection, and web access." actions={<SaveActions dirty={dirty} busy={busy} onSave={onSave} />}>
-    <div className="grid items-start gap-5 xl:grid-cols-2">
+  return <Tabs value={section} onValueChange={(value) => setSection(String(value))} className="flex h-full min-h-0 w-full flex-col gap-0">
+    <PageFrame title="Settings" description="Manage your miner, notifications, and account access." navigation={navigation} actions={(section === "mining" || section === "connection" || dirty) ? <SaveActions dirty={dirty} busy={busy} onSave={onSave} /> : undefined}>
+      <TabsContent value="mining">
       <SettingsGroup title="Mining behavior" icon={<ListChecksIcon />}>
         <Field label="Priority mode" description="Controls how eligible campaigns are ordered."><select className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm" value={draft.priority_mode || ""} onChange={(event) => setPriorityMode(event.target.value)}>{(draft.priority_modes || []).map((mode) => <option key={mode}>{mode}</option>)}</select></Field>
         <Toggle label="Farm unlinked drops" description={priorityOnly ? "Farm campaigns that do not require a linked game account." : "Available only when Priority mode is Priority list only."} checked={priorityOnly && Boolean(draft.farm_unlinked)} disabled={!priorityOnly} onChange={(value) => onChange("farm_unlinked", value)} />
         <Toggle label="Badge and emote drops" description="Include campaigns whose rewards are badges or emotes." checked={Boolean(draft.enable_badges_emotes)} onChange={(value) => onChange("enable_badges_emotes", value)} />
         <Toggle label="Auto-farm free badges" description="When priority work is idle, farm watch-time badge rewards. Subscription badges are skipped." checked={Boolean(draft.auto_farm_badges)} onChange={(value) => onChange("auto_farm_badges", value)} />
+        <Toggle label="Skip drops that cannot finish" description="Skip a reward when its remaining watch time exceeds the time left before expiry. Continue with the next eligible reward or category." checked={Boolean(draft.skip_unfinishable_drops)} onChange={(value) => onChange("skip_unfinishable_drops", value)} />
         <Toggle label="Extra availability check" description="Run the additional Twitch availability lookup." checked={Boolean(draft.available_drops_check)} onChange={(value) => onChange("available_drops_check", value)} />
         <Toggle label="Trust allowed channels" description="Use a campaign's explicit channel list when Twitch's availability lookup omits it." checked={Boolean(draft.trust_allowed_channels)} onChange={(value) => onChange("trust_allowed_channels", value)} />
       </SettingsGroup>
+      </TabsContent>
+      <TabsContent value="connection">
       <SettingsGroup title="Connection" icon={<GlobeIcon />}>
         <Field label="Proxy URL" description="Optional HTTP or HTTPS proxy. Restart the miner after changing it."><Input value={draft.proxy || ""} placeholder="https://proxy.example:8080" onChange={(event) => onChange("proxy", event.target.value)} /></Field>
         <Field label="Language" description="Used for miner status messages after restart."><select className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm" value={draft.language || "English"} onChange={(event) => onChange("language", event.target.value)}>{(draft.languages || ["English"]).map((language) => <option key={language}>{language}</option>)}</select></Field>
         <Field label={`Connection quality: ${draft.connection_quality || 1}`} description="Higher values use longer network timeouts for slower connections."><input className="w-full accent-[var(--primary)]" type="range" min="1" max="6" value={draft.connection_quality || 1} onChange={(event) => onChange("connection_quality", Number(event.target.value))} /></Field>
       </SettingsGroup>
+      </TabsContent>
+      <TabsContent value="notifications">
       <SettingsGroup title="Discord notifications" icon={<DiscordLogoIcon />}>
         <div className="rounded-xl bg-muted p-4">
           <div className="flex items-center justify-between gap-4"><div><p className="text-sm font-medium">{notifications.webhook_label || "Not configured"}</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">The saved token stays on this server and is never returned to the browser.</p></div><Badge variant="secondary" className={notifications.configured ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}>{notifications.configured ? "Configured" : "Not configured"}</Badge></div>
@@ -569,12 +585,18 @@ function SettingsPanel({ draft, dirty, busy, session, notifications, notificatio
           <Button variant="ghost" className="text-destructive hover:text-destructive" disabled={!notifications.configured || busy.startsWith("notifications")} onClick={onRemoveNotifications}><TrashIcon />{busy === "notifications-remove" ? "Removing" : "Remove"}</Button>
         </div>
       </SettingsGroup>
+      </TabsContent>
+      <TabsContent value="security">
       <SettingsGroup title="Security" icon={<KeyIcon />}>
-        <p className="text-sm leading-relaxed text-muted-foreground">Device login needs no Chromium or desktop helper on this server. Saved sessions survive updates; if Twitch revokes a device session, activate a new code. Browser token import remains available and may need Chromium. Website logout does not stop mining.</p>
-        <div className="flex flex-wrap gap-2"><PasswordDialog session={session} onSignedOut={onSignedOut} /><DeviceLoginDialog busy={!!busy} onConfirm={onDeviceLogin} /><ImportTokenDialog busy={busy === "import-token"} onImport={onImport} /><ResetTwitchDialog busy={busy === "invalidate"} onConfirm={onInvalidate} /></div>
+        <div className="flex flex-col items-start justify-between gap-4 sm:flex-row"><div className="max-w-xl"><h3 className="text-sm font-medium">Administrator password</h3><p className="mt-1 text-sm leading-relaxed text-muted-foreground">Protect access to this dashboard. Changing the password signs out every website session without stopping the miner.</p></div><div className="shrink-0"><PasswordDialog session={session} onSignedOut={onSignedOut} /></div></div>
+        <Separator />
+        <div><h3 className="text-sm font-medium">Twitch authorization</h3><p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">Device login needs no browser on this server. Saved sessions survive updates; if Twitch revokes access, activate a new code. Browser token import may require Chromium.</p><div className="mt-4 flex flex-wrap gap-2"><DeviceLoginDialog busy={!!busy} onConfirm={onDeviceLogin} /><ImportTokenDialog busy={busy === "import-token"} onImport={onImport} /></div></div>
+        <Separator />
+        <div className="flex flex-col items-start justify-between gap-4 sm:flex-row"><div className="max-w-xl"><h3 className="text-sm font-medium">Reset Twitch session</h3><p className="mt-1 text-sm leading-relaxed text-muted-foreground">Remove the miner's saved authorization and sign in again. This does not log you out of Twitch in your browser.</p></div><div className="shrink-0"><ResetTwitchDialog busy={busy === "invalidate"} onConfirm={onInvalidate} /></div></div>
       </SettingsGroup>
-    </div>
-  </PageFrame>
+      </TabsContent>
+    </PageFrame>
+  </Tabs>
 }
 
 function SettingsGroup({ title, icon, children }: { title: string; icon: ReactNode; children: ReactNode }) { return <div className="rounded-2xl border border-border bg-card p-5"><div className="mb-5 flex items-center gap-2"><span className="text-primary">{icon}</span><h2 className="font-semibold">{title}</h2></div><div className="space-y-5">{children}</div></div> }

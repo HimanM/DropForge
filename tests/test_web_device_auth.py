@@ -1,7 +1,9 @@
 import asyncio
 import json
+import io
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -16,7 +18,7 @@ from web.auth import AuthStore
 from web.catalog import WebTwitch
 from web.claims import PendingClaims
 from web.controller import MinerController
-from web.manager import WebLogin
+from web.manager import WebLogin, WebManager
 from web.server import create_app
 from tui.state import TUIState
 from web.twitch_auth import TV_CLIENT, WebDeviceAuth
@@ -212,6 +214,14 @@ class PendingClaimTests(unittest.IsolatedAsyncioTestCase):
 
 
 class DeviceLoginApiTests(unittest.IsolatedAsyncioTestCase):
+    async def test_web_miner_messages_reach_service_stdout(self):
+        manager = object.__new__(WebManager)
+        manager.notifier = None
+        with patch("tui.manager.TUIManager.print") as update_ui, redirect_stdout(io.StringIO()) as journal:
+            manager.print("Free badge completed: fixture")
+        update_ui.assert_called_once_with("Free badge completed: fixture")
+        self.assertEqual(journal.getvalue(), "Free badge completed: fixture\n")
+
     async def test_device_login_requires_authentication_and_csrf(self):
         with tempfile.TemporaryDirectory() as directory:
             auth_path = Path(directory, "auth.sqlite3")

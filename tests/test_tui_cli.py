@@ -16,6 +16,7 @@ class SettingsStub:
         self.farm_unlinked = False
         self.enable_badges_emotes = False
         self.auto_farm_badges = False
+        self.skip_unfinishable_drops = False
         self.trust_allowed_channels = False
         self.priority_mode = PriorityMode.PRIORITY_ONLY
         self.saved = False
@@ -25,6 +26,12 @@ class SettingsStub:
 
 
 class PortableCLITests(unittest.TestCase):
+    def test_skip_unfinishable_command_persists_and_updates_state(self):
+        manager = self.make_manager()
+        manager._handle_command("/skip-unfinishable on")
+        self.assertTrue(manager._twitch.settings.skip_unfinishable_drops)
+        self.assertTrue(manager.state.skip_unfinishable_drops)
+        self.assertTrue(manager._twitch.settings.saved)
     def make_manager(self):
         twitch = SimpleNamespace(
             settings=SettingsStub(),

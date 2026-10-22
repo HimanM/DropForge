@@ -61,13 +61,14 @@ _C_TAB_INACTIVE = "#5f5f87"
 _C_HEADER_BG = "#0f1520"
 
 
+def _console(width: int) -> Console:
+    # Rich otherwise ignores explicit width under TERM=dumb unless height is also supplied.
+    return Console(file=StringIO(), width=width, height=shutil.get_terminal_size((width, 24)).lines,
+                   force_terminal=True, legacy_windows=False)
+
+
 def _render_rich(rich_object: Any, width: int) -> str:
-    console = Console(
-        file=StringIO(),
-        width=width,
-        force_terminal=True,
-        no_color=False,
-    )
+    console = _console(width)
     console.print(rich_object)
     return console.file.getvalue()  # type: ignore[union-attr]
 
@@ -178,6 +179,7 @@ class PortableCLIManager(TUIManager):
         "/auto-badges",
         "/auto-badges on",
         "/auto-badges off",
+        "/skip-unfinishable", "/skip-unfinishable on", "/skip-unfinishable off",
         "/trust-allowed",
         "/trust-allowed on",
         "/trust-allowed off",
@@ -396,6 +398,8 @@ class PortableCLIManager(TUIManager):
             self._set_badges_emotes(rest.lower() in {"1", "on", "true", "yes"})
         elif command == "auto-badges":
             self._set_auto_farm_badges(rest.lower() in {"1", "on", "true", "yes"})
+        elif command == "skip-unfinishable":
+            self._set_skip_unfinishable_drops(rest.lower() in {"1", "on", "true", "yes"})
         elif command == "trust-allowed":
             self._set_trust_allowed_channels(rest.lower() in {"1", "on", "true", "yes"})
         elif command == "detach":
@@ -418,7 +422,7 @@ class PortableCLIManager(TUIManager):
             return list(self.state.exclude)
         if command == "/switch":
             return [channel.name for channel in self.state.channels.values()]
-        if command in {"/farm-unlinked", "/badges", "/auto-badges", "/trust-allowed", "/filter not-linked", "/filter upcoming", "/filter expired", "/filter excluded", "/filter finished"}:
+        if command in {"/farm-unlinked", "/badges", "/auto-badges", "/skip-unfinishable", "/trust-allowed", "/filter not-linked", "/filter upcoming", "/filter expired", "/filter excluded", "/filter finished"}:
             return ["on", "off"]
         if command == "/mode":
             return ["priority-only", "ending-soonest", "low-availability"]
@@ -570,7 +574,7 @@ class PortableCLIManager(TUIManager):
         self._view = "help"
 
     def _rich_help(self, width: int) -> str:
-        console = Console(file=StringIO(), width=width, force_terminal=True)
+        console = _console(width)
         topic = getattr(self, "_help_topic", None)
         if topic and topic in self.HELP_PAGES:
             self._print_help_table(console, topic, self.HELP_PAGES[topic])
@@ -694,7 +698,7 @@ class PortableCLIManager(TUIManager):
         bar_width = max(10, min(40, width - 10))
         filled = round(bar_width * progress)
         bar = f"[{'#' * filled}{'-' * (bar_width - filled)}]"
-        console = Console(file=StringIO(), width=width, force_terminal=True)
+        console = _console(width)
         console.print()
         if width >= 50:
             logo_text = _LOGO.strip("\n")
@@ -734,7 +738,7 @@ class PortableCLIManager(TUIManager):
     # ── Title & tabs ─────────────────────────────────────────────────
 
     def _rich_title(self, width: int) -> str:
-        console = Console(file=StringIO(), width=width, force_terminal=True)
+        console = _console(width)
         right = datetime.now().strftime("%H:%M:%S")
         title = Text()
         title.append("DropForge ", style=f"bold {_C_CYAN}")
@@ -746,7 +750,7 @@ class PortableCLIManager(TUIManager):
         return console.file.getvalue().rstrip("\n")  # type: ignore[union-attr]
 
     def _rich_tabs(self, width: int) -> str:
-        console = Console(file=StringIO(), width=width, force_terminal=True)
+        console = _console(width)
         tabs = ["dashboard", "drops", "channels", "settings", "logs", "help"]
         t = Text()
         for i, tab in enumerate(tabs):
@@ -762,7 +766,7 @@ class PortableCLIManager(TUIManager):
     # ── Dashboard view ───────────────────────────────────────────────
 
     def _rich_dashboard(self, width: int, available_height: int) -> str:
-        console = Console(file=StringIO(), width=width, force_terminal=True)
+        console = _console(width)
         drop = self.state.current_drop
         watching = next((ch.name for ch in self.state.channels.values() if ch.watching), "-")
         websockets = sum(1 for ws in self.state.websockets.values() if "connected" in ws.status.lower())
@@ -828,7 +832,7 @@ class PortableCLIManager(TUIManager):
     # ── Channels view ────────────────────────────────────────────────
 
     def _rich_channels(self, width: int) -> str:
-        console = Console(file=StringIO(), width=width, force_terminal=True)
+        console = _console(width)
         channels = list(self.state.channels.values())
         page = channels[self._channel_offset : self._channel_offset + self.CHANNEL_PAGE_SIZE]
         total = len(channels)
@@ -877,7 +881,7 @@ class PortableCLIManager(TUIManager):
     # ── Drops/Campaigns view ─────────────────────────────────────────
 
     def _rich_drops(self, width: int) -> str:
-        console = Console(file=StringIO(), width=width, force_terminal=True)
+        console = _console(width)
         campaigns = self._visible_campaigns()
         self._campaign_offset = min(self._campaign_offset, max(0, len(campaigns) - self.CAMPAIGN_PAGE_SIZE))
         page = campaigns[self._campaign_offset : self._campaign_offset + self.CAMPAIGN_PAGE_SIZE]
@@ -942,7 +946,7 @@ class PortableCLIManager(TUIManager):
     # ── Settings view ────────────────────────────────────────────────
 
     def _rich_settings(self, width: int) -> str:
-        console = Console(file=StringIO(), width=width, force_terminal=True)
+        console = _console(width)
 
         table = Table(
             title=f"[bold {_C_GREEN}]Settings[/]",
@@ -958,6 +962,7 @@ class PortableCLIManager(TUIManager):
         table.add_row("Farm unlinked", Text("on" if self.state.farm_unlinked else "off", style=_C_GREEN if self.state.farm_unlinked else _C_DIM))
         table.add_row("Badges/emotes", Text("on" if self.state.enable_badges_emotes else "off", style=_C_GREEN if self.state.enable_badges_emotes else _C_DIM))
         table.add_row("Auto free badges", Text("on" if self.state.auto_farm_badges else "off", style=_C_GREEN if self.state.auto_farm_badges else _C_DIM))
+        table.add_row("Skip unfinishable", Text("on" if self.state.skip_unfinishable_drops else "off", style=_C_GREEN if self.state.skip_unfinishable_drops else _C_DIM))
         table.add_row("Trust allowed", Text("on" if self.state.trust_allowed_channels else "off", style=_C_GREEN if self.state.trust_allowed_channels else _C_DIM))
         table.add_row("Available", Text(f"{len(self.state.available_games)} games", style=_C_TEXT))
 
@@ -1028,6 +1033,7 @@ class PortableCLIManager(TUIManager):
         console.print(Text("  /priority bump <game>  /priority demote <game>", style=_C_DIM))
         console.print(Text("  /exclude add <game>  /mode <name>", style=_C_DIM))
         console.print(Text("  /farm-unlinked on|off  /badges on|off  /auto-badges on|off", style=_C_DIM))
+        console.print(Text("  /skip-unfinishable on|off", style=_C_DIM))
         console.print(Text("  /trust-allowed on|off", style=_C_DIM))
 
         return console.file.getvalue()  # type: ignore[union-attr]
@@ -1035,7 +1041,7 @@ class PortableCLIManager(TUIManager):
     # ── Logs view ────────────────────────────────────────────────────
 
     def _rich_logs(self, width: int, available_height: int) -> str:
-        console = Console(file=StringIO(), width=width, force_terminal=True)
+        console = _console(width)
         console.print(f"[bold {_C_AMBER}]Logs[/]")
         logs = self.state.logs[-max(1, available_height):] or ["No recent activity"]
         for line in logs:
@@ -1045,7 +1051,7 @@ class PortableCLIManager(TUIManager):
     # ── Login view ───────────────────────────────────────────────────
 
     def _render_login(self, width: int, height: int) -> str:
-        console = Console(file=StringIO(), width=width, force_terminal=True)
+        console = _console(width)
         login = self.state.login
         spinner = self._spinner_char()
 

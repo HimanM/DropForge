@@ -116,6 +116,7 @@ class TUIState:
     farm_unlinked: bool = False
     enable_badges_emotes: bool = False
     auto_farm_badges: bool = False
+    skip_unfinishable_drops: bool = False
     trust_allowed_channels: bool = False
     campaign_filters: CampaignFilters = field(default_factory=CampaignFilters)
     login: LoginSnapshot = field(default_factory=LoginSnapshot)

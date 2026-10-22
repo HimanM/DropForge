@@ -359,6 +359,9 @@ Environment="TDMINER_DATA_DIR=$DATA_DIR"
 Environment="TDMINER_HOST=$HOST"
 Environment="TDMINER_PORT=$PORT"
 Environment="PYTHONUNBUFFERED=1"
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dropforge
 ExecStart=$APP_DIR/current/venv/bin/python $APP_DIR/current/tdminer_web.py serve
 Restart=on-failure
 RestartSec=5
@@ -471,6 +474,9 @@ EOF
   fi
   echo "Persistent data: $DATA_DIR"
   echo "Service helper: $INSTALL_DIR/tdminer-web"
+  echo "Service status: sudo systemctl status $SERVICE_NAME.service --no-pager"
+  echo "Live logs: sudo journalctl -u $SERVICE_NAME.service -f"
+  echo "Helper logs: $INSTALL_DIR/tdminer-web logs"
   echo "Run the same curl command again to update without replacing data or browser sessions."
   echo "Use TDMINER_MODE=cli to switch interfaces."
   # ponytail: releases are retained for rollback; add retention after storage becomes measurable.
