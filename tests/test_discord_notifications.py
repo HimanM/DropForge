@@ -1,9 +1,12 @@
 import tempfile
 import unittest
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
+from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from web.auth import AuthStore
@@ -257,6 +260,78 @@ class DiscordNotificationTests(unittest.TestCase):
 
 
 class DiscordNotificationApiTests(unittest.IsolatedAsyncioTestCase):
+    async def test_artwork_is_uploaded_and_embedded_with_rate_limit_retry(self) -> None:
+        received = []
+
+        async def webhook(request):
+            reader = await request.multipart()
+            parts = {}
+            while (part := await reader.next()) is not None:
+                parts[part.name] = bytes(await part.read())
+            received.append(parts)
+            if len(received) == 1:
+                return web.json_response({"retry_after": 0}, status=429)
+            return web.json_response({"id": "message"})
+
+        app = web.Application()
+        app.router.add_post("/webhook", webhook)
+        with tempfile.TemporaryDirectory() as directory:
+            notifier = DiscordNotifier(AuthStore(Path(directory, "auth.sqlite3")))
+            drop = campaign().drops[0]
+            payload = notifier._claimed_payload(drop)
+            art = b"test PNG bytes"
+            with patch.object(notifier, "_download_image", AsyncMock(return_value=("png", "image/png", art))) as download:
+                async with TestServer(app) as server:
+                    await notifier._post(str(server.make_url("/webhook")), payload)
+            self.assertEqual(download.await_count, 2)
+            self.assertEqual(len(received), 2)
+            for parts in received:
+                embed = json.loads(parts["payload_json"])["embeds"][0]
+                self.assertEqual(embed["image"]["url"], "attachment://artwork-0.png")
+                self.assertEqual(embed["thumbnail"]["url"], "attachment://artwork-1.png")
+                self.assertEqual(parts["files[0]"], art)
+                self.assertEqual(parts["files[1]"], art)
+            self.assertEqual(payload["embeds"][0]["image"]["url"], drop.benefits[0].image_url)
+
+    async def test_artwork_duplicates_are_reused_and_failures_keep_remote_embed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            notifier = DiscordNotifier(AuthStore(Path(directory, "auth.sqlite3")))
+            payload = notifier._new_drops_payload(campaign(), [campaign().drops[0]] * 9)
+            with patch.object(notifier, "_download_image", AsyncMock(return_value=None)) as download:
+                prepared, files = await notifier._attach_images(None, payload)
+            self.assertEqual(download.await_count, 2)
+            self.assertEqual(prepared, payload)
+            self.assertEqual(files, [])
+            with patch.object(notifier, "_download_image", AsyncMock(return_value=("png", "image/png", b"art"))):
+                prepared, files = await notifier._attach_images(None, payload)
+            self.assertEqual(len(files), 2)
+            self.assertTrue(all(embed["image"]["url"] == "attachment://artwork-0.png"
+                                for embed in prepared["embeds"][1:]))
+
+    async def test_artwork_download_is_bounded_and_restricted(self) -> None:
+        session = MagicMock()
+        for url in ("http://static-cdn.jtvnw.net/a.png", "https://127.0.0.1/a.png",
+                    "https://static-cdn.jtvnw.net.evil.test/a.png", "https://static-cdn.jtvnw.net:443/a.png"):
+            self.assertIsNone(await DiscordNotifier._download_image(session, url))
+        session.get.assert_not_called()
+        response = MagicMock(status=200, content_type="image/png")
+        session.get.return_value.__aenter__ = AsyncMock(return_value=response)
+        session.get.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        async def chunks(size):
+            yield b"a" * size
+
+        url = "https://static-cdn.jtvnw.net/reward.png"
+        response.content.iter_chunked.side_effect = lambda _: chunks(32)
+        self.assertEqual(await DiscordNotifier._download_image(session, url), ("png", "image/png", b"a" * 32))
+        self.assertFalse(session.get.call_args.kwargs["allow_redirects"])
+        response.content.iter_chunked.side_effect = lambda _: chunks(512 * 1024 + 1)
+        self.assertIsNone(await DiscordNotifier._download_image(session, url))
+        response.status = 302
+        self.assertIsNone(await DiscordNotifier._download_image(session, url))
+        response.status, response.content_type = 200, "text/html"
+        self.assertIsNone(await DiscordNotifier._download_image(session, url))
+
     async def test_authenticated_update_never_returns_the_webhook_token(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             auth_path = Path(directory, "auth.sqlite3")

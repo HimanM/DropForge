@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import re
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from time import time
 from typing import Any, TYPE_CHECKING
@@ -24,6 +25,8 @@ _ORANGE = 0xE9773D
 _GREEN = 0x2DBA83
 _RED = 0xD9534F
 _WEBHOOK_PATH = re.compile(r"^/api(?:/v\d+)?/webhooks/(\d+)/([A-Za-z0-9._-]+)$")
+_IMAGE_HOSTS = {"static-cdn.jtvnw.net", "ttvdrops.lovinator.space"}
+_IMAGE_TYPES = {"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp"}
 _DEFAULTS = {
     "discord_url": "",
     "discord_enabled": "0",
@@ -346,8 +349,18 @@ class DiscordNotifier:
     async def _post(self, url: str, payload: dict[str, Any]) -> None:
         timeout = aiohttp.ClientTimeout(total=12)
         async with aiohttp.ClientSession(timeout=timeout) as session:
+            payload, files = await self._attach_images(session, payload)
             for attempt in range(2):
-                async with session.post(f"{url}?wait=true", json=payload) as response:
+                if files:
+                    # Multipart bodies must be rebuilt after a rate-limit retry.
+                    form = aiohttp.FormData()
+                    form.add_field("payload_json", json.dumps(payload), content_type="application/json")
+                    for index, (filename, content_type, data) in enumerate(files):
+                        form.add_field(f"files[{index}]", data, filename=filename, content_type=content_type)
+                    request = {"data": form}
+                else:
+                    request = {"json": payload}
+                async with session.post(f"{url}?wait=true", **request) as response:
                     if response.status == 429 and attempt == 0:
                         data = await response.json(content_type=None)
                         await asyncio.sleep(min(float(data.get("retry_after", 1)), 10))
@@ -357,6 +370,54 @@ class DiscordNotifier:
                     detail = _trim(await response.text(), 200)
                     raise RuntimeError(f"Discord returned HTTP {response.status}: {detail}")
         raise RuntimeError("Discord rate limit retry failed.")
+
+    @staticmethod
+    async def _download_image(session: aiohttp.ClientSession, url: str) -> tuple[str, str, bytes] | None:
+        try:
+            parts = urlsplit(url)
+            allowed = (parts.scheme == "https" and parts.hostname in _IMAGE_HOSTS
+                       and parts.port is None and parts.username is None and parts.password is None)
+        except ValueError:
+            return None
+        if not allowed:
+            return None
+        try:
+            async with session.get(url, allow_redirects=False, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                content_type = response.content_type
+                if response.status != 200 or content_type not in _IMAGE_TYPES:
+                    return None
+                data = bytearray()
+                async for chunk in response.content.iter_chunked(65536):
+                    data.extend(chunk)
+                    if len(data) > 512 * 1024:
+                        return None
+                if data:
+                    return _IMAGE_TYPES[content_type], content_type, bytes(data)
+        except (aiohttp.ClientError, asyncio.TimeoutError):
+            logger.warning("Discord artwork download failed; retaining the external image URL.")
+        return None
+
+    async def _attach_images(
+        self, session: aiohttp.ClientSession, payload: dict[str, Any]
+    ) -> tuple[dict[str, Any], list[tuple[str, str, bytes]]]:
+        payload = deepcopy(payload)
+        images = [embed[key] for key in ("image", "thumbnail")
+                  for embed in payload.get("embeds", []) if key in embed]
+        # Keep artwork only in RAM for this send; no disk cache on small servers.
+        # Prioritize reward art, reuse duplicates, and stay below Discord's upload limits.
+        urls = list(dict.fromkeys(image["url"] for image in images))[:10]
+        downloads = await asyncio.gather(*(self._download_image(session, url) for url in urls))
+        files = []
+        for url, downloaded in zip(urls, downloads):
+            if downloaded is None:
+                continue
+            extension, content_type, data = downloaded
+            filename = f"artwork-{len(files)}.{extension}"
+            files.append((filename, content_type, data))
+            for image in images:
+                if image["url"] == url:
+                    image["url"] = f"attachment://{filename}"
+        return payload, files
 
     @staticmethod
     def _payload(embeds: list[dict[str, Any]]) -> dict[str, Any]:
