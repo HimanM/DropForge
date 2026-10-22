@@ -3,6 +3,7 @@ import http.cookiejar
 import json
 import os
 import shutil
+import site
 import socket
 import sqlite3
 import subprocess
@@ -98,6 +99,7 @@ os.execv({sys.executable!r},[{sys.executable!r},*args])
                    "TDMINER_HOST": "127.0.0.1", "TDMINER_APP_DIR": str(base / "app"),
                    "TDMINER_INSTALL_DIR": str(base / "launchers"), "TDMINER_INSTALL_BROWSER": "0",
                    "TDMINER_ADMIN_PASSWORD": "installer test password", "TDMINER_RECOVERY_CODE": "installer-recovery-test",
+                   "PYTHONPATH": os.pathsep.join(site.getsitepackages()),
                    "PIP_NO_INDEX": "1", "PIP_DISABLE_PIP_VERSION_CHECK": "1"}
             def install(success=True):
                 result = subprocess.run(["sh", str(root / "scripts/install.sh")], env=env, capture_output=True, text=True, timeout=120)
