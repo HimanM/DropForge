@@ -17,6 +17,7 @@ export type Drop = {
   claimed: boolean
   claim_pending?: boolean
   earned: boolean
+  is_free_badge: boolean
   claimable: boolean
   starts: string
   ends: string

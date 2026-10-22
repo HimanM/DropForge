@@ -303,7 +303,10 @@ tdminer
 - **Auto-farm free badges** runs only when priority work is idle and skips subscription badges.
 - **Priority and excluded games** are managed in the dedicated Games page or the desktop Settings tab.
 - Use **Save and reload** after selection changes so the active inventory is rebuilt immediately.
-- Discord notifications are filtered to priority categories to avoid unrelated campaign spam.
+- Discord Drop notifications follow priority categories. With **Auto-farm free badges** enabled, earned free badges and badge-fallback status are also reported outside the priority list; subscription badges and unrelated item Drops stay filtered out. **Earned Drops and badges** controls completion notifications.
+- In the web **Campaigns** page, choose **Free badges** to browse watch-time badges across categories without changing mining priorities. Zero-minute subscription badges are excluded, and **Finished** shows earned badges even when their campaign still has other rewards.
+- Discord reward messages show the supplied reward image prominently, with category art as a thumbnail and a direct reward-image link.
+- Web logs show newest messages first, with text search, event-category filters and an **Errors** filter. Categories are best-effort labels for the original miner text; the buffer remains the latest 200 messages.
 
 Some campaigns require a linked game account. Manage links at [Twitch Drops campaigns](https://www.twitch.tv/drops/campaigns).
 

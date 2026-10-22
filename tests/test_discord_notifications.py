@@ -138,11 +138,12 @@ class DiscordNotificationTests(unittest.TestCase):
         self.assertEqual(len(self.payloads), 1)
         message = self.payloads[0]
         self.assertEqual(message["allowed_mentions"], {"parse": []})
-        self.assertEqual(message["embeds"][0]["image"]["url"], selected.image_url)
+        self.assertEqual(message["embeds"][0]["thumbnail"]["url"], selected.image_url)
         self.assertEqual(
-            message["embeds"][1]["thumbnail"]["url"],
+            message["embeds"][1]["image"]["url"],
             selected.drops[0].benefits[0].image_url,
         )
+        self.assertEqual(message["embeds"][1]["thumbnail"]["url"], selected.image_url)
 
         selected.drops[0].is_claimed = True
         self.notifier.drop_updated(selected.drops[0], ["Priority Game"])
@@ -151,6 +152,9 @@ class DiscordNotificationTests(unittest.TestCase):
             "New priority Drops detected",
             "Drop claimed",
         ])
+        earned = self.payloads[-1]["embeds"][0]
+        self.assertEqual(earned["image"]["url"], selected.drops[0].benefits[0].image_url)
+        self.assertIn(selected.drops[0].benefits[0].image_url, str(earned["fields"]))
 
     def test_earned_unclaimed_drop_sends_completion_message(self) -> None:
         selected = campaign()
@@ -213,6 +217,42 @@ class DiscordNotificationTests(unittest.TestCase):
         self.notifier.operational("Miner restarting", "Retrying", event_key="restart")
         self.notifier.operational("Miner restarting", "Retrying", event_key="restart")
 
+        self.assertEqual(len(self.payloads), 1)
+
+    def test_auto_badges_notify_outside_priority_without_item_spam(self) -> None:
+        selected = campaign("Badge Game", "free-watch-badge")
+        drop = selected.drops[0]
+        drop.is_free_badge = True
+        drop.is_claimed = True
+        self.notifier.drop_updated(drop, [])
+        self.assertEqual(self.payloads, [])
+        self.notifier.drop_updated(drop, [], auto_farm_badges=True)
+        self.notifier.drop_updated(drop, [], auto_farm_badges=True)
+        other = campaign("Badge Game", "subscription-or-item").drops[0]
+        other.is_claimed = True
+        self.notifier.drop_updated(other, [], auto_farm_badges=True)
+        self.assertEqual(len(self.payloads), 1)
+        self.assertEqual(self.payloads[0]["embeds"][0]["title"], "Free badge earned")
+        self.assertEqual(self.payloads[0]["embeds"][0]["footer"]["text"], "DropForge | Free badges")
+        restarted = DiscordNotifier(self.store)
+        restarted._schedule = self.payloads.append
+        restarted.drop_updated(drop, [], auto_farm_badges=True)
+        self.assertEqual(len(self.payloads), 1)
+
+    def test_auto_badge_start_includes_non_priority_categories_and_respects_opt_out(self) -> None:
+        selected = campaign("Badge Game")
+        selected.has_free_badge = True
+        manager = SimpleNamespace(
+            _twitch=SimpleNamespace(settings=SimpleNamespace(priority=[], auto_farm_badges=True)),
+            inv=SimpleNamespace(campaigns={selected.id: selected}),
+        )
+        self.notifier.badge_farming_started(manager, [selected.game])
+        self.assertEqual(len(self.payloads), 1)
+        self.assertIn("Badge Game", str(self.payloads[0]["embeds"][0]["fields"]))
+        self.notifier.update({"notify_claimed": False})
+        selected.drops[0].is_free_badge = True
+        selected.drops[0].is_claimed = True
+        self.notifier.drop_updated(selected.drops[0], [], auto_farm_badges=True)
         self.assertEqual(len(self.payloads), 1)
 
 

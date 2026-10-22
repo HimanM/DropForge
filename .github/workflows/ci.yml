@@ -91,6 +91,7 @@ jobs:
         run: |
           python3 -m pip install -r requirements-web.txt
           npm ci --prefix web/frontend
+          npm run test --prefix web/frontend
 
       - name: Build web frontend
         run: |

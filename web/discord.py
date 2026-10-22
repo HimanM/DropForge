@@ -157,18 +157,20 @@ class DiscordNotifier:
         if baseline and new_drops and campaign.game.name in priority and self._enabled("new_drops"):
             self._schedule(self._new_drops_payload(campaign, new_drops))
 
-    def drop_updated(self, drop: TimedDrop, priority: list[str]) -> None:
+    def drop_updated(self, drop: TimedDrop, priority: list[str], *, auto_farm_badges: bool = False) -> None:
         campaign = drop.campaign
-        if (drop.is_claimed or drop.is_earned) and self.store.claim_notification_event(
-            f"discord:claimed:{drop.id}"
+        selected = campaign.game.name in priority
+        if (
+            (selected or auto_farm_badges and drop.is_free_badge)
+            and self._enabled("claimed")
+            and (drop.is_claimed or drop.is_earned)
+            and self.store.claim_notification_event(f"discord:claimed:{drop.id}")
         ):
-            if campaign.game.name in priority and self._enabled("claimed"):
-                self._schedule(self._claimed_payload(drop))
-        if campaign.finished and self.store.claim_notification_event(
+            self._schedule(self._claimed_payload(drop))
+        if selected and self._enabled("status") and campaign.finished and self.store.claim_notification_event(
             f"discord:complete:{campaign.id}"
         ):
-            if campaign.game.name in priority and self._enabled("status"):
-                self._schedule(self._campaign_complete_payload(campaign))
+            self._schedule(self._campaign_complete_payload(campaign))
 
     def idle(self, manager: WebManager) -> None:
         priority = list(manager._twitch.settings.priority)
@@ -232,7 +234,8 @@ class DiscordNotifier:
 
     def badge_farming_started(self, manager: WebManager, games: list[Any]) -> None:
         priority = set(manager._twitch.settings.priority)
-        categories = tuple(game.name for game in games if game.name in priority)
+        auto_badges = bool(getattr(manager._twitch.settings, "auto_farm_badges", False))
+        categories = tuple(sorted({game.name for game in games if auto_badges or game.name in priority}))
         if not categories or not self._enabled("status"):
             return
         key = f"discord:badge-fallback:{'|'.join(categories)}"
@@ -245,13 +248,15 @@ class DiscordNotifier:
             ),
             None,
         )
-        self._schedule(self._status_payload(
+        embed = self._embed(
             "Free badge fallback active",
             "Priority mining is idle, so DropForge is farming eligible watch-time badges.",
-            categories,
             _ORANGE,
-            image=_image(campaign.image_url) if campaign else None,
-        ))
+            fields=[("Badge categories", ", ".join(categories))],
+            thumbnail=_image(campaign.image_url) if campaign else None,
+        )
+        embed["footer"] = {"text": "DropForge | Free badges"}
+        self._schedule(self._payload([embed]))
 
     def miner_stopped(self, manager: WebManager) -> None:
         drop = manager.progress._drop
@@ -409,7 +414,7 @@ class DiscordNotifier:
             "DropForge found new rewards for a category in your priority list.",
             _ORANGE,
             fields=fields,
-            image=_image(campaign.image_url),
+            thumbnail=_image(campaign.image_url),
             url=str(campaign.link_url),
         )]
         embeds.extend(self._drop_embed(drop) for drop in drops[:9])
@@ -425,8 +430,9 @@ class DiscordNotifier:
             fields=[
                 ("Watch time", f"{drop.required_minutes} minutes"),
                 ("Available until", drop.ends_at.astimezone().strftime("%Y-%m-%d %H:%M %Z")),
-            ],
-            thumbnail=thumbnail,
+            ] + ([("Reward image", f"[Open reward image]({thumbnail})")] if thumbnail else []),
+            image=thumbnail,
+            thumbnail=_image(drop.campaign.image_url),
         )
 
     def _claimed_payload(self, drop: TimedDrop) -> dict[str, Any]:
@@ -445,21 +451,26 @@ class DiscordNotifier:
             ("Campaign", campaign.name),
             ("Campaign progress", f"{campaign.completed_drops}/{campaign.total_drops} Drops earned"),
         ]
+        if thumbnail:
+            fields.append(("Reward image", f"[Open reward image]({thumbnail})"))
         if pending:
             fields.append(("Delivery", "Claim accepted; awaiting Twitch confirmation. Link your game account if required."))
         elif not drop.is_claimed:
             fields.append(
                 ("Delivery", "Watch requirement complete. Link or claim it in Twitch if required.")
             )
-        return self._payload([self._embed(
+        embed = self._embed(
             title,
             reward,
             _GREEN,
             fields=fields,
-            image=_image(campaign.image_url),
-            thumbnail=thumbnail,
+            image=thumbnail,
+            thumbnail=_image(campaign.image_url),
             url=str(campaign.link_url),
-        )])
+        )
+        if drop.is_free_badge:
+            embed["footer"] = {"text": "DropForge | Free badges"}
+        return self._payload([embed])
 
     def _campaign_complete_payload(self, campaign: DropsCampaign) -> dict[str, Any]:
         return self._payload([self._embed(

@@ -53,6 +53,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
+import { filterCampaigns, type CampaignFilter, type RewardFilter } from "@/lib/campaigns"
+import { filterLogs, logCategories, type LogFilter } from "@/lib/logs"
 import type { Campaign, MinerState, NotificationSettings, SessionMeta, Settings } from "@/types"
 
 type Props = {
@@ -460,31 +462,27 @@ function PageFrame({ title, description, actions, children }: { title: string; d
 
 function Campaigns({ campaigns }: { campaigns: Campaign[] }) {
   const [query, setQuery] = useState("")
-  const [filter, setFilter] = useState<"available" | "all" | "finished">("available")
-  const visible = useMemo(() => campaigns.filter((campaign) => {
-    const matches = `${campaign.game} ${campaign.name}`.toLowerCase().includes(query.toLowerCase())
-    if (!matches) return false
-    if (filter === "finished") return campaign.finished
-    if (filter === "available") return !campaign.finished && !campaign.expired && !campaign.excluded
-    return true
-  }), [campaigns, filter, query])
+  const [filter, setFilter] = useState<CampaignFilter>("available")
+  const [rewards, setRewards] = useState<RewardFilter>("all")
+  const visible = useMemo(() => filterCampaigns(campaigns, filter, rewards, query), [campaigns, filter, rewards, query])
 
-  const controls = <div className="flex gap-2"><div className="relative flex-1"><MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" /><Input className="h-9 min-w-0 pl-9 sm:w-64" placeholder="Search campaigns" value={query} onChange={(event) => setQuery(event.target.value)} /></div><select className="h-9 rounded-lg border border-input bg-background px-2 text-sm" value={filter} onChange={(event) => setFilter(event.target.value as typeof filter)}><option value="available">Available</option><option value="all">All</option><option value="finished">Finished</option></select></div>
+  const controls = <div className="flex flex-wrap gap-2"><div className="relative min-w-0 flex-1 basis-full sm:basis-auto"><MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" /><Input aria-label="Search campaigns" className="h-9 min-w-0 pl-9 sm:w-56" placeholder="Search campaigns" value={query} onChange={(event) => setQuery(event.target.value)} /></div><select aria-label="Reward type" className="h-9 flex-1 rounded-lg border border-input bg-background px-2 text-sm sm:flex-none" value={rewards} onChange={(event) => setRewards(event.target.value as RewardFilter)}><option value="all">Drops &amp; badges</option><option value="free-badges">Free badges</option></select><select aria-label="Campaign status" className="h-9 flex-1 rounded-lg border border-input bg-background px-2 text-sm sm:flex-none" value={filter} onChange={(event) => setFilter(event.target.value as CampaignFilter)}><option value="available">Available</option><option value="all">All</option><option value="finished">Finished</option></select></div>
 
-  return <PageFrame title="Campaigns" description="Category art, rewards, eligibility, and progress from Twitch." actions={controls}>
+  return <PageFrame title="Campaigns" description={rewards === "free-badges" ? "Free watch-time badges across categories. Mining priorities are unchanged." : "Category art, rewards, eligibility, and progress from Twitch."} actions={controls}>
     {visible.length === 0 ? <div className="rounded-2xl border border-dashed border-border p-12 text-center"><GiftIcon className="mx-auto size-8 text-muted-foreground" /><p className="mt-4 font-medium">No campaigns match</p><p className="mt-1 text-sm text-muted-foreground">Try another filter or reload the inventory.</p></div> : <div className="grid gap-5 xl:grid-cols-2">{visible.map((campaign) => <CampaignCard key={campaign.id} campaign={campaign} />)}</div>}
   </PageFrame>
 }
 
 function CampaignCard({ campaign }: { campaign: Campaign }) {
+  const badgesOnly = campaign.drops.every((drop) => drop.is_free_badge)
   return <article className="grid overflow-hidden rounded-2xl border border-border bg-card sm:grid-cols-[150px_minmax(0,1fr)]">
     <img className="h-52 w-full object-cover object-top sm:h-full" src={campaign.category_image_url} alt={`${campaign.game} category art`} loading="lazy" />
     <div className="min-w-0 p-4 sm:p-5">
       <div className="flex items-start justify-between gap-4"><div className="min-w-0"><p className="truncate text-sm font-semibold">{campaign.game}</p><h2 className="mt-1 line-clamp-2 text-base leading-snug text-muted-foreground">{campaign.name}</h2></div><Badge variant="secondary" className={statusTone(campaign.status)}>{campaign.status}</Badge></div>
-      <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground"><span className="flex items-center gap-1.5"><ClockIcon />Ends {new Date(campaign.ends).toLocaleDateString()}</span><span className={campaign.linked || campaign.eligible ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}>{campaign.linked ? "Account linked" : campaign.eligible ? "Farming without link" : "Link required"}</span></div>
+      <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground"><span className="flex items-center gap-1.5"><ClockIcon />Ends {new Date(campaign.ends).toLocaleDateString()}</span>{badgesOnly ? <span className="text-primary">Free watch-time badges</span> : <span className={campaign.linked || campaign.eligible ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}>{campaign.linked ? "Account linked" : campaign.eligible ? "Farming without link" : "Link required"}</span>}</div>
       <Progress className="mt-5" value={campaign.progress * 100}><ProgressLabel>Progress</ProgressLabel><span className="ml-auto text-sm tabular-nums text-muted-foreground">{percent(campaign.progress)}</span></Progress>
-      <div className="scrollbar-theme mt-5 flex gap-2 overflow-x-auto pb-2">{campaign.drops.flatMap((drop) => drop.benefits.map((benefit) => <div key={`${drop.id}-${benefit.id || benefit.name}`} className="min-w-28 rounded-xl bg-muted p-2"><img className="aspect-square w-full rounded-lg object-cover" src={benefit.image_url} alt={benefit.name} loading="lazy" /><p className="mt-2 line-clamp-2 text-[11px] font-medium leading-snug">{benefit.name}</p><p className="mt-1 text-[10px] text-muted-foreground">{drop.claim_pending ? campaign.linked ? "Claim pending confirmation" : "Earned · link to receive" : drop.claimed ? "Claimed" : drop.earned ? campaign.linked ? "Earned · awaiting claim" : "Earned · link to receive" : `${drop.current_minutes}/${drop.required_minutes} min`}</p></div>))}</div>
-      {!campaign.linked && campaign.link_url && <a className="mt-4 inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline" href={campaign.link_url} rel="noreferrer" target="_blank">Link to receive rewards<LinkSimpleIcon /></a>}
+      <div className="scrollbar-theme mt-5 flex gap-2 overflow-x-auto pb-2">{campaign.drops.flatMap((drop) => drop.benefits.map((benefit) => <div key={`${drop.id}-${benefit.id || benefit.name}`} className="w-28 shrink-0 rounded-xl bg-muted p-2"><img className="aspect-square w-full rounded-lg object-contain" src={benefit.image_url} alt={benefit.name} loading="lazy" /><p className="mt-2 line-clamp-2 text-[11px] font-medium leading-snug">{benefit.name}</p><p className="mt-1 text-[10px] text-muted-foreground">{drop.is_free_badge && (drop.claimed || drop.earned) ? "Badge earned" : drop.claim_pending ? campaign.linked ? "Claim pending confirmation" : "Earned · link to receive" : drop.claimed ? "Claimed" : drop.earned ? campaign.linked ? "Earned · awaiting claim" : "Earned · link to receive" : `${drop.current_minutes}/${drop.required_minutes} min`}</p></div>))}</div>
+      {!badgesOnly && !campaign.linked && campaign.link_url && <a className="mt-4 inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline" href={campaign.link_url} rel="noreferrer" target="_blank">Link to receive rewards<LinkSimpleIcon /></a>}
     </div>
   </article>
 }
@@ -539,7 +537,7 @@ function SettingsPanel({ draft, dirty, busy, session, notifications, notificatio
   const setPriorityMode = (value: string) => { onChange("priority_mode", value); if (value !== PRIORITY_ONLY) onChange("farm_unlinked", false) }
 
   return <PageFrame title="Settings" description="Mining behavior, connection, and web access." actions={<SaveActions dirty={dirty} busy={busy} onSave={onSave} />}>
-    <div className="grid gap-5 xl:grid-cols-2">
+    <div className="grid items-start gap-5 xl:grid-cols-2">
       <SettingsGroup title="Mining behavior" icon={<ListChecksIcon />}>
         <Field label="Priority mode" description="Controls how eligible campaigns are ordered."><select className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm" value={draft.priority_mode || ""} onChange={(event) => setPriorityMode(event.target.value)}>{(draft.priority_modes || []).map((mode) => <option key={mode}>{mode}</option>)}</select></Field>
         <Toggle label="Farm unlinked drops" description={priorityOnly ? "Farm campaigns that do not require a linked game account." : "Available only when Priority mode is Priority list only."} checked={priorityOnly && Boolean(draft.farm_unlinked)} disabled={!priorityOnly} onChange={(value) => onChange("farm_unlinked", value)} />
@@ -558,8 +556,8 @@ function SettingsPanel({ draft, dirty, busy, session, notifications, notificatio
           <div className="flex items-center justify-between gap-4"><div><p className="text-sm font-medium">{notifications.webhook_label || "Not configured"}</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">The saved token stays on this server and is never returned to the browser.</p></div><Badge variant="secondary" className={notifications.configured ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}>{notifications.configured ? "Configured" : "Not configured"}</Badge></div>
         </div>
         <Field label="Webhook URL" description="Paste an official Discord channel webhook. Saving a blank field keeps the existing URL."><Input type="password" autoComplete="off" value={notificationDraft.webhook_url} placeholder={notifications.configured ? "Saved webhook is hidden" : "https://discord.com/api/webhooks/..."} onChange={(event) => onNotificationChange("webhook_url", event.target.value)} /></Field>
-        <Toggle label="Enable notifications" description="Drop and mining events follow the priority list. Auth and operational alerts are server-wide." checked={notificationDraft.enabled} onChange={(value) => onNotificationChange("enabled", value)} />
-        <Toggle label="Earned Drops" description="Notify when watch requirements finish, including delivery status and reward art." checked={notificationDraft.notify_claimed} onChange={(value) => onNotificationChange("notify_claimed", value)} />
+        <Toggle label="Enable notifications" description="Drop events follow priorities, plus auto-farmed free badges. Auth and operational alerts are server-wide." checked={notificationDraft.enabled} onChange={(value) => onNotificationChange("enabled", value)} />
+        <Toggle label="Earned Drops and badges" description="Notify when watch requirements finish, including auto-farmed free badges, delivery status, and reward art." checked={notificationDraft.notify_claimed} onChange={(value) => onNotificationChange("notify_claimed", value)} />
         <Toggle label="New priority Drops" description="Send one structured message when new rewards are detected." checked={notificationDraft.notify_new_drops} onChange={(value) => onNotificationChange("notify_new_drops", value)} />
         <Toggle label="Mining status" description="Report start, recovery, completion, and priority-channel problems." checked={notificationDraft.notify_status} onChange={(value) => onNotificationChange("notify_status", value)} />
         <Toggle label="Operational alerts" description="Optional global crash and Twitch verification alerts. These are not category-specific." checked={notificationDraft.notify_operational} onChange={(value) => onNotificationChange("notify_operational", value)} />
@@ -613,5 +611,11 @@ function ImportTokenDialog({ busy, onImport }: { busy: boolean; onImport: (token
 }
 
 function Logs({ logs }: { logs: string[] }) {
-  return <PageFrame title="Logs" description="The latest 200 miner messages."><div className="scrollbar-theme min-h-80 overflow-auto rounded-2xl border border-border bg-[#171614] p-4 text-stone-300"><pre className="font-mono text-xs leading-6">{logs.length ? logs.join("\n") : "No log messages yet."}</pre></div></PageFrame>
+  const [query, setQuery] = useState("")
+  const [filter, setFilter] = useState<LogFilter>("All")
+  const visible = useMemo(() => filterLogs(logs, filter, query), [logs, filter, query])
+  const controls = <div className="flex gap-2"><div className="relative min-w-0 flex-1"><MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" /><Input aria-label="Search logs" className="h-9 pl-9 sm:w-64" placeholder="Search logs" value={query} onChange={(event) => setQuery(event.target.value)} /></div><select aria-label="Log category" className="h-9 min-w-0 rounded-lg border border-input bg-background px-2 text-sm" value={filter} onChange={(event) => setFilter(event.target.value as LogFilter)}>{(["All", "Errors", ...logCategories] as LogFilter[]).map((category) => <option key={category}>{category}</option>)}</select></div>
+  return <PageFrame title="Logs" description={`Newest first · ${visible.length} of ${logs.length} buffered messages`} actions={controls}>
+    <div className="overflow-hidden rounded-2xl border border-border bg-card">{visible.length ? visible.map((entry) => <div key={`${entry.index}-${entry.message}`} className="flex flex-col items-start gap-2 border-b border-border/60 px-4 py-3 last:border-0 sm:flex-row sm:gap-4"><Badge variant="secondary" className={cn("shrink-0 sm:w-28 sm:justify-center", entry.error && "text-destructive")}>{entry.category}</Badge><pre className={cn("min-w-0 whitespace-pre-wrap break-words font-mono text-xs leading-6", entry.error ? "text-destructive" : "text-foreground/85")}>{entry.message}</pre></div>) : <p className="p-8 text-center text-sm text-muted-foreground">{logs.length ? "No messages match your filters." : "No log messages yet."}</p>}</div>
+  </PageFrame>
 }

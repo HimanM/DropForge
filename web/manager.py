@@ -50,7 +50,8 @@ class WebInventory(TUIInventory):
         super().update_drop(drop)
         if self._manager.notifier is not None:
             self._manager.notifier.drop_updated(
-                drop, list(self._manager._twitch.settings.priority)
+                drop, list(self._manager._twitch.settings.priority),
+                auto_farm_badges=bool(self._manager._twitch.settings.auto_farm_badges),
             )
 
 
@@ -152,6 +153,7 @@ class WebManager(TUIManager):
             "claimed": drop.is_claimed and not pending,
             "claim_pending": pending,
             "earned": drop.is_earned,
+            "is_free_badge": drop.is_free_badge,
             "claimable": drop.can_claim,
             "starts": drop.starts_at.isoformat(),
             "ends": drop.ends_at.isoformat(),
