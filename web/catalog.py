@@ -10,9 +10,11 @@ import aiohttp
 from yarl import URL
 
 from core.constants import CACHE_PATH, GQL_QUERIES, JsonType
-from core.exceptions import GQLException
+from core.exceptions import GQLException, ReloadRequest
 from core.utils import chunk, json_load, json_save
 from network.twitch import Twitch
+from web.claims import PendingClaims
+from web.twitch_auth import DeviceCookies, TV_CLIENT, WebDeviceAuth
 
 
 logger = logging.getLogger("TwitchDrops")
@@ -25,9 +27,25 @@ CATALOG_REFRESH_BATCH = 10
 class WebTwitch(Twitch):
     """Web-only Twitch client with public campaign discovery fallback."""
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, browser_free=False, store=None, **kwargs):
         super().__init__(*args, **kwargs)
         self._catalog_campaigns: dict[str, JsonType] = {}
+        self.pending_claims = PendingClaims(store) if store is not None else None
+        if browser_free:
+            self._auth_state = WebDeviceAuth(self)
+
+    async def get_session(self) -> aiohttp.ClientSession:
+        if not isinstance(self._auth_state, WebDeviceAuth):
+            return await super().get_session()
+        if self._session is None:
+            quality = max(1, min(self.settings.connection_quality, 6))
+            self._session = aiohttp.ClientSession(
+                cookie_jar=DeviceCookies(),
+                timeout=aiohttp.ClientTimeout(sock_connect=5 * quality, total=10 * quality),
+                connector=aiohttp.TCPConnector(limit=50),
+                headers={"User-Agent": TV_CLIENT.USER_AGENT},
+            )
+        return self._session
 
     def _merge_data(self, primary_data: JsonType, secondary_data: JsonType) -> JsonType:
         if not self._catalog_campaigns:
@@ -261,16 +279,49 @@ class WebTwitch(Twitch):
         return campaigns
 
     async def gql_request(self, ops):
+        operation = ops.get("operationName") if isinstance(ops, dict) else None
+        claim_key = ((ops.get("variables") or {}).get("input") or {}).get("dropInstanceID") if operation == GQL_QUERIES["ClaimDrop"]["operationName"] else None
+        if self.pending_claims is not None and claim_key and self.pending_claims.recent(claim_key):
+            # Reuse the accepted receipt for an hour, not an invented inventory confirmation.
+            return {"data": {"claimDropRewards": {"status": "ELIGIBLE_FOR_ALL"}}}
+        result = await self._gql_request(ops)
+        notifier = getattr(self.gui, "notifier", None)
+        if notifier is not None and operation != GQL_QUERIES["Campaigns"]["operationName"] and notifier.auth_alert().get("kind") in {"permissions", "verification", "login_error"}:
+            notifier.auth_recovered()
+        if self.pending_claims is not None:
+            if operation == GQL_QUERIES["Inventory"]["operationName"]:
+                self.pending_claims.reconcile(result)
+            elif claim_key and ((result.get("data") or {}).get("claimDropRewards") or {}).get("status") == "ELIGIBLE_FOR_ALL":
+                self.pending_claims.accepted(claim_key)
+            elif claim_key and ((result.get("data") or {}).get("claimDropRewards") or {}).get("status") == "DROP_INSTANCE_ALREADY_CLAIMED":
+                self.pending_claims.confirmed(claim_key)
+        return result
+
+    async def _gql_request(self, ops):
         is_campaign_list = (
             isinstance(ops, dict)
             and ops.get("operationName") == GQL_QUERIES["Campaigns"].get("operationName")
         )
         if not is_campaign_list:
-            return await super().gql_request(ops)
+            delay = 5
+            while True:
+                try:
+                    return await super().gql_request(ops)
+                except ReloadRequest:
+                    if not isinstance(self._auth_state, WebDeviceAuth):
+                        raise
+                    await self.get_auth()
+                    self.print(f"Twitch rejected a device-session query, but OAuth remains valid; retrying in {delay} seconds.")
+                    notifier = getattr(self.gui, "notifier", None)
+                    if notifier is not None:
+                        notifier.auth_issue("permissions", "Twitch rejected a Drops request while the OAuth session is valid. Retrying; resetting login is not yet necessary.",
+                                            requires_login=False, notify=delay >= 10)
+                    await self.gui.coro_unless_closed(asyncio.sleep(delay))
+                    delay = min(delay * 2, 60)
 
         response: JsonType = {"data": {"currentUser": {"dropCampaigns": []}}}
         original_error: GQLException | None = None
-        if not self._catalog_campaigns:
+        if not self._catalog_campaigns and not isinstance(self._auth_state, WebDeviceAuth):
             try:
                 response = await super().gql_request(ops)
                 campaigns = ((response.get("data") or {}).get("currentUser") or {}).get(

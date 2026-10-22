@@ -49,10 +49,13 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Progress, ProgressLabel } from "@/components/ui/progress"
+import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
+import { filterCampaigns, type CampaignFilter, type RewardFilter } from "@/lib/campaigns"
+import { filterLogs, logCategories, type LogFilter } from "@/lib/logs"
 import type { Campaign, MinerState, NotificationSettings, SessionMeta, Settings } from "@/types"
 
 type Props = {
@@ -63,7 +66,7 @@ type Props = {
 type Tab = "overview" | "campaigns" | "channels" | "games" | "settings" | "logs"
 
 type SettingsChange = <K extends keyof Settings>(key: K, value: Settings[K]) => void
-type NotificationDraft = Pick<NotificationSettings, "enabled" | "notify_claimed" | "notify_new_drops" | "notify_status" | "notify_operational"> & { webhook_url: string }
+type NotificationDraft = Pick<NotificationSettings, "enabled" | "notify_claimed" | "notify_new_drops" | "notify_status" | "notify_operational" | "notify_auth"> & { webhook_url: string }
 type NotificationChange = <K extends keyof NotificationDraft>(key: K, value: NotificationDraft[K]) => void
 
 const PRIORITY_ONLY = "Priority list only"
@@ -123,7 +126,7 @@ export function Dashboard({ session, onSignedOut }: Props) {
   const [error, setError] = useState("")
   const [settingsDraft, setSettingsDraft] = useState<Partial<Settings>>({})
   const [settingsDirty, setSettingsDirty] = useState(false)
-  const [notificationDraft, setNotificationDraft] = useState<NotificationDraft>({ enabled: false, notify_claimed: true, notify_new_drops: true, notify_status: true, notify_operational: false, webhook_url: "" })
+  const [notificationDraft, setNotificationDraft] = useState<NotificationDraft>({ enabled: false, notify_claimed: true, notify_new_drops: true, notify_status: true, notify_operational: false, notify_auth: true, webhook_url: "" })
   const [notificationDirty, setNotificationDirty] = useState(false)
   const [notificationMessage, setNotificationMessage] = useState("")
   const [theme, setTheme] = useState<"light" | "dark">(() => {
@@ -184,6 +187,7 @@ export function Dashboard({ session, onSignedOut }: Props) {
       notify_new_drops: state.notifications.notify_new_drops ?? true,
       notify_status: state.notifications.notify_status ?? true,
       notify_operational: Boolean(state.notifications.notify_operational),
+      notify_auth: state.notifications.notify_auth ?? true,
       webhook_url: "",
     })
   }, [notificationDirty, state.notifications])
@@ -210,6 +214,10 @@ export function Dashboard({ session, onSignedOut }: Props) {
 
   async function resetTwitch() {
     if (await runAction("invalidate", "/api/miner/invalidate-auth")) setTab("overview")
+  }
+
+  async function deviceLogin() {
+    if (await runAction("device-login", "/api/twitch/device-login")) setTab("overview")
   }
 
   async function importTwitch(token: string) {
@@ -341,6 +349,13 @@ export function Dashboard({ session, onSignedOut }: Props) {
 
         {error && <div className="mt-4 flex shrink-0 items-start gap-2 rounded-xl border border-red-500/25 bg-red-500/8 p-3 text-sm text-red-700 dark:text-red-300" role="alert"><WarningIcon className="mt-0.5 shrink-0" />{error}</div>}
 
+        {state.auth_alert?.message && <div className="scrollbar-theme mt-3 flex max-h-36 shrink-0 flex-wrap items-center gap-3 overflow-y-auto rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm" role="alert">
+          <WarningIcon className="size-5 shrink-0 text-amber-600 dark:text-amber-400" />
+          <div className="min-w-0 flex-1"><p className="font-semibold">{state.auth_alert.requires_login ? "Twitch login needs attention" : "Twitch authentication issue"}</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">{state.auth_alert.message}</p></div>
+          <Button size="sm" variant="outline" onClick={async () => { setTab(state.auth_alert?.requires_login ? "overview" : "logs"); if (state.auth_alert?.requires_login && !state.miner.running) await runAction("start", "/api/miner/start") }}>{state.auth_alert.requires_login ? "Open login" : "View logs"}</Button>
+          {state.auth_alert.requires_login && state.login.activation_url && <a className="inline-flex h-7 items-center gap-1.5 rounded-lg bg-primary px-2.5 text-xs font-medium text-primary-foreground" href={state.login.activation_url} target="_blank" rel="noreferrer">Activate on Twitch<LinkSimpleIcon /></a>}
+        </div>}
+
         <TabsContent value="overview" className="scrollbar-theme min-h-0 overflow-y-auto py-5 pr-1">
           {loading ? <OverviewSkeleton /> : (
             <motion.div initial={reduce ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-5 pb-1">
@@ -377,10 +392,14 @@ export function Dashboard({ session, onSignedOut }: Props) {
                 <section className="rounded-2xl border border-orange-500/25 bg-orange-500/8 p-5 sm:flex sm:items-center sm:justify-between sm:gap-6">
                   <div>
                     <p className="font-semibold">Connect Twitch</p>
-                    <p className="mt-1 text-sm text-muted-foreground">Import the <code>auth-token</code> cookie from a browser signed in to Twitch.</p>
+                    {state.login.user_code ? (
+                      <p className="mt-1 text-sm text-muted-foreground">Open Twitch on any device and enter <strong className="select-all font-mono text-lg tracking-widest text-foreground">{state.login.user_code}</strong>. This server does not need a browser.</p>
+                    ) : <p className="mt-1 text-sm text-muted-foreground">Use a device code for browser-free servers, or import a browser session.</p>}
+                    <p className="mt-1 text-xs text-muted-foreground" role="status">{state.login.status}</p>
                   </div>
                   <div className="mt-4 flex shrink-0 flex-wrap gap-2 sm:mt-0">
-                    <a className="inline-flex h-9 items-center gap-2 rounded-lg border border-input bg-background px-3 text-sm font-medium" href="https://www.twitch.tv/drops/campaigns" rel="noreferrer" target="_blank">Open Twitch<LinkSimpleIcon /></a>
+                    {state.login.user_code && <a className="inline-flex h-9 items-center gap-2 rounded-lg border border-input bg-background px-3 text-sm font-medium" href={state.login.activation_url} rel="noreferrer" target="_blank">Activate on Twitch<LinkSimpleIcon /></a>}
+                    {state.login_method !== "device" && <DeviceLoginDialog busy={!!busy} onConfirm={deviceLogin} />}
                     <ImportTokenDialog busy={busy === "import-token"} onImport={importTwitch} />
                   </div>
                 </section>
@@ -414,7 +433,7 @@ export function Dashboard({ session, onSignedOut }: Props) {
         <TabsContent value="campaigns" className="min-h-0 overflow-hidden pt-5"><Campaigns campaigns={state.campaigns} /></TabsContent>
         <TabsContent value="channels" className="min-h-0 overflow-hidden pt-5"><Channels state={state} busy={busy} onSelect={(id) => runAction("channel", "/api/channels/select", { method: "POST", body: JSON.stringify({ channel_id: id }) })} /></TabsContent>
         <TabsContent value="games" className="min-h-0 overflow-hidden pt-5"><GameRules draft={settingsDraft} dirty={settingsDirty} busy={busy} onChange={changeSetting} onSave={saveSettings} /></TabsContent>
-        <TabsContent value="settings" className="min-h-0 overflow-hidden pt-5"><SettingsPanel draft={settingsDraft} dirty={settingsDirty} busy={busy} session={session} notifications={state.notifications} notificationDraft={notificationDraft} notificationDirty={notificationDirty} notificationMessage={notificationMessage} onSignedOut={onSignedOut} onChange={changeSetting} onNotificationChange={changeNotification} onSave={saveSettings} onSaveNotifications={saveNotifications} onTestNotifications={testNotifications} onRemoveNotifications={removeNotifications} onInvalidate={resetTwitch} onImport={importTwitch} /></TabsContent>
+        <TabsContent value="settings" className="min-h-0 overflow-hidden pt-5"><SettingsPanel draft={settingsDraft} dirty={settingsDirty} busy={busy} session={session} notifications={state.notifications} notificationDraft={notificationDraft} notificationDirty={notificationDirty} notificationMessage={notificationMessage} onSignedOut={onSignedOut} onChange={changeSetting} onNotificationChange={changeNotification} onSave={saveSettings} onSaveNotifications={saveNotifications} onTestNotifications={testNotifications} onRemoveNotifications={removeNotifications} onInvalidate={resetTwitch} onImport={importTwitch} onDeviceLogin={deviceLogin} /></TabsContent>
         <TabsContent value="logs" className="min-h-0 overflow-hidden pt-5"><Logs logs={state.logs} /></TabsContent>
       </Tabs>
 
@@ -432,43 +451,40 @@ function OverviewSkeleton() {
   return <div className="space-y-7"><Skeleton className="h-[420px] rounded-2xl" /><div className="grid grid-cols-2 gap-5 sm:grid-cols-4">{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-16" />)}</div><div className="grid gap-5 lg:grid-cols-2"><Skeleton className="h-64 rounded-2xl" /><Skeleton className="h-64 rounded-2xl" /></div></div>
 }
 
-function PageFrame({ title, description, actions, children }: { title: string; description: string; actions?: ReactNode; children: ReactNode }) {
+function PageFrame({ title, description, actions, navigation, children }: { title: string; description: string; actions?: ReactNode; navigation?: ReactNode; children: ReactNode }) {
   return <section className="flex h-full min-h-0 flex-col">
     <div className="flex shrink-0 flex-col gap-4 pb-5 sm:flex-row sm:items-end sm:justify-between">
       <div><h1 className="text-2xl font-semibold tracking-[-0.03em]">{title}</h1><p className="mt-1 text-sm text-muted-foreground">{description}</p></div>
       {actions}
     </div>
+    {navigation}
     <div className="scrollbar-theme min-h-0 flex-1 overflow-y-auto overscroll-contain pb-6 pr-1">{children}</div>
   </section>
 }
 
 function Campaigns({ campaigns }: { campaigns: Campaign[] }) {
   const [query, setQuery] = useState("")
-  const [filter, setFilter] = useState<"available" | "all" | "finished">("available")
-  const visible = useMemo(() => campaigns.filter((campaign) => {
-    const matches = `${campaign.game} ${campaign.name}`.toLowerCase().includes(query.toLowerCase())
-    if (!matches) return false
-    if (filter === "finished") return campaign.finished
-    if (filter === "available") return !campaign.finished && !campaign.expired && !campaign.excluded
-    return true
-  }), [campaigns, filter, query])
+  const [filter, setFilter] = useState<CampaignFilter>("available")
+  const [rewards, setRewards] = useState<RewardFilter>("all")
+  const visible = useMemo(() => filterCampaigns(campaigns, filter, rewards, query), [campaigns, filter, rewards, query])
 
-  const controls = <div className="flex gap-2"><div className="relative flex-1"><MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" /><Input className="h-9 min-w-0 pl-9 sm:w-64" placeholder="Search campaigns" value={query} onChange={(event) => setQuery(event.target.value)} /></div><select className="h-9 rounded-lg border border-input bg-background px-2 text-sm" value={filter} onChange={(event) => setFilter(event.target.value as typeof filter)}><option value="available">Available</option><option value="all">All</option><option value="finished">Finished</option></select></div>
+  const controls = <div className="flex flex-wrap gap-2"><div className="relative min-w-0 flex-1 basis-full sm:basis-auto"><MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" /><Input aria-label="Search campaigns" className="h-9 min-w-0 pl-9 sm:w-56" placeholder="Search campaigns" value={query} onChange={(event) => setQuery(event.target.value)} /></div><select aria-label="Reward type" className="h-9 flex-1 rounded-lg border border-input bg-background px-2 text-sm sm:flex-none" value={rewards} onChange={(event) => setRewards(event.target.value as RewardFilter)}><option value="all">Drops &amp; badges</option><option value="free-badges">Free badges</option></select><select aria-label="Campaign status" className="h-9 flex-1 rounded-lg border border-input bg-background px-2 text-sm sm:flex-none" value={filter} onChange={(event) => setFilter(event.target.value as CampaignFilter)}><option value="available">Available</option><option value="all">All</option><option value="finished">Finished</option></select></div>
 
-  return <PageFrame title="Campaigns" description="Category art, rewards, eligibility, and progress from Twitch." actions={controls}>
+  return <PageFrame title="Campaigns" description={rewards === "free-badges" ? "Free watch-time badges across categories. Mining priorities are unchanged." : "Category art, rewards, eligibility, and progress from Twitch."} actions={controls}>
     {visible.length === 0 ? <div className="rounded-2xl border border-dashed border-border p-12 text-center"><GiftIcon className="mx-auto size-8 text-muted-foreground" /><p className="mt-4 font-medium">No campaigns match</p><p className="mt-1 text-sm text-muted-foreground">Try another filter or reload the inventory.</p></div> : <div className="grid gap-5 xl:grid-cols-2">{visible.map((campaign) => <CampaignCard key={campaign.id} campaign={campaign} />)}</div>}
   </PageFrame>
 }
 
 function CampaignCard({ campaign }: { campaign: Campaign }) {
+  const badgesOnly = campaign.drops.every((drop) => drop.is_free_badge)
   return <article className="grid overflow-hidden rounded-2xl border border-border bg-card sm:grid-cols-[150px_minmax(0,1fr)]">
     <img className="h-52 w-full object-cover object-top sm:h-full" src={campaign.category_image_url} alt={`${campaign.game} category art`} loading="lazy" />
     <div className="min-w-0 p-4 sm:p-5">
       <div className="flex items-start justify-between gap-4"><div className="min-w-0"><p className="truncate text-sm font-semibold">{campaign.game}</p><h2 className="mt-1 line-clamp-2 text-base leading-snug text-muted-foreground">{campaign.name}</h2></div><Badge variant="secondary" className={statusTone(campaign.status)}>{campaign.status}</Badge></div>
-      <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground"><span className="flex items-center gap-1.5"><ClockIcon />Ends {new Date(campaign.ends).toLocaleDateString()}</span><span className={campaign.linked || campaign.eligible ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}>{campaign.linked ? "Account linked" : campaign.eligible ? "Farming without link" : "Link required"}</span></div>
+      <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground"><span className="flex items-center gap-1.5"><ClockIcon />Ends {new Date(campaign.ends).toLocaleDateString()}</span>{badgesOnly ? <span className="text-primary">Free watch-time badges</span> : <span className={campaign.linked || campaign.eligible ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}>{campaign.linked ? "Account linked" : campaign.eligible ? "Farming without link" : "Link required"}</span>}</div>
       <Progress className="mt-5" value={campaign.progress * 100}><ProgressLabel>Progress</ProgressLabel><span className="ml-auto text-sm tabular-nums text-muted-foreground">{percent(campaign.progress)}</span></Progress>
-      <div className="scrollbar-theme mt-5 flex gap-2 overflow-x-auto pb-2">{campaign.drops.flatMap((drop) => drop.benefits.map((benefit) => <div key={`${drop.id}-${benefit.id || benefit.name}`} className="min-w-28 rounded-xl bg-muted p-2"><img className="aspect-square w-full rounded-lg object-cover" src={benefit.image_url} alt={benefit.name} loading="lazy" /><p className="mt-2 line-clamp-2 text-[11px] font-medium leading-snug">{benefit.name}</p><p className="mt-1 text-[10px] text-muted-foreground">{drop.claimed ? "Claimed" : drop.earned ? "Earned · link to receive" : `${drop.current_minutes}/${drop.required_minutes} min`}</p></div>))}</div>
-      {!campaign.linked && campaign.link_url && <a className="mt-4 inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline" href={campaign.link_url} rel="noreferrer" target="_blank">Link to receive rewards<LinkSimpleIcon /></a>}
+      <div className="scrollbar-theme mt-5 flex gap-2 overflow-x-auto pb-2">{campaign.drops.flatMap((drop) => drop.benefits.map((benefit) => <div key={`${drop.id}-${benefit.id || benefit.name}`} className="w-28 shrink-0 rounded-xl bg-muted p-2"><img className="aspect-square w-full rounded-lg object-contain" src={benefit.image_url} alt={benefit.name} loading="lazy" /><p className="mt-2 line-clamp-2 text-[11px] font-medium leading-snug">{benefit.name}</p><p className="mt-1 text-[10px] text-muted-foreground">{drop.is_free_badge && (drop.claimed || drop.earned) ? "Badge earned" : drop.claim_pending ? campaign.linked ? "Claim pending confirmation" : "Earned · link to receive" : drop.claimed ? "Claimed" : drop.earned ? campaign.linked ? "Earned · awaiting claim" : "Earned · link to receive" : `${drop.current_minutes}/${drop.required_minutes} min`}</p></div>))}</div>
+      {!badgesOnly && !campaign.linked && campaign.link_url && <a className="mt-4 inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline" href={campaign.link_url} rel="noreferrer" target="_blank">Link to receive rewards<LinkSimpleIcon /></a>}
     </div>
   </article>
 }
@@ -518,35 +534,50 @@ function SaveActions({ dirty, busy, onSave }: { dirty: boolean; busy: string; on
   return <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={!dirty || saving} onClick={() => onSave(false)}><FloppyDiskIcon />{busy === "settings" ? "Saving" : "Save"}</Button><Button disabled={saving} onClick={() => onSave(true)}><ArrowsClockwiseIcon />{busy === "settings-reload" ? "Saving and reloading" : "Save and reload"}</Button></div>
 }
 
-function SettingsPanel({ draft, dirty, busy, session, notifications, notificationDraft, notificationDirty, notificationMessage, onChange, onNotificationChange, onSave, onSaveNotifications, onTestNotifications, onRemoveNotifications, onInvalidate, onImport, onSignedOut }: { draft: Partial<Settings>; dirty: boolean; busy: string; session: SessionMeta; notifications: Partial<NotificationSettings>; notificationDraft: NotificationDraft; notificationDirty: boolean; notificationMessage: string; onChange: SettingsChange; onNotificationChange: NotificationChange; onSave: (reload: boolean) => void; onSaveNotifications: () => void; onTestNotifications: () => void; onRemoveNotifications: () => void; onInvalidate: () => void; onImport: (token: string) => Promise<boolean>; onSignedOut: () => void }) {
+function SettingsPanel({ draft, dirty, busy, session, notifications, notificationDraft, notificationDirty, notificationMessage, onChange, onNotificationChange, onSave, onSaveNotifications, onTestNotifications, onRemoveNotifications, onInvalidate, onImport, onDeviceLogin, onSignedOut }: { draft: Partial<Settings>; dirty: boolean; busy: string; session: SessionMeta; notifications: Partial<NotificationSettings>; notificationDraft: NotificationDraft; notificationDirty: boolean; notificationMessage: string; onChange: SettingsChange; onNotificationChange: NotificationChange; onSave: (reload: boolean) => void; onSaveNotifications: () => void; onTestNotifications: () => void; onRemoveNotifications: () => void; onInvalidate: () => void; onImport: (token: string) => Promise<boolean>; onDeviceLogin: () => void; onSignedOut: () => void }) {
+  const [section, setSection] = useState("mining")
   const priorityOnly = draft.priority_mode === PRIORITY_ONLY
   const setPriorityMode = (value: string) => { onChange("priority_mode", value); if (value !== PRIORITY_ONLY) onChange("farm_unlinked", false) }
+  const sections = [
+    { value: "mining", label: "Mining", icon: <ListChecksIcon /> },
+    { value: "connection", label: "Connection", icon: <GlobeIcon /> },
+    { value: "notifications", label: "Notifications", icon: <DiscordLogoIcon /> },
+    { value: "security", label: "Security", icon: <KeyIcon /> },
+  ]
+  const navigation = <TabsList aria-label="Settings sections" variant="line" className="mb-6 grid min-h-12 w-full shrink-0 grid-cols-4 justify-start border-b border-border p-0 sm:flex">{sections.map((item) => <TabsTrigger key={item.value} value={item.value} className="min-h-12 flex-none gap-2 px-1 text-xs data-active:text-primary after:bottom-[-1px] after:bg-primary sm:px-5 sm:text-sm"><span className="hidden sm:inline-flex">{item.icon}</span>{item.label}</TabsTrigger>)}</TabsList>
 
-  return <PageFrame title="Settings" description="Mining behavior, connection, and web access." actions={<SaveActions dirty={dirty} busy={busy} onSave={onSave} />}>
-    <div className="grid gap-5 xl:grid-cols-2">
+  return <Tabs value={section} onValueChange={(value) => setSection(String(value))} className="flex h-full min-h-0 w-full flex-col gap-0">
+    <PageFrame title="Settings" description="Manage your miner, notifications, and account access." navigation={navigation} actions={(section === "mining" || section === "connection" || dirty) ? <SaveActions dirty={dirty} busy={busy} onSave={onSave} /> : undefined}>
+      <TabsContent value="mining">
       <SettingsGroup title="Mining behavior" icon={<ListChecksIcon />}>
         <Field label="Priority mode" description="Controls how eligible campaigns are ordered."><select className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm" value={draft.priority_mode || ""} onChange={(event) => setPriorityMode(event.target.value)}>{(draft.priority_modes || []).map((mode) => <option key={mode}>{mode}</option>)}</select></Field>
         <Toggle label="Farm unlinked drops" description={priorityOnly ? "Farm campaigns that do not require a linked game account." : "Available only when Priority mode is Priority list only."} checked={priorityOnly && Boolean(draft.farm_unlinked)} disabled={!priorityOnly} onChange={(value) => onChange("farm_unlinked", value)} />
         <Toggle label="Badge and emote drops" description="Include campaigns whose rewards are badges or emotes." checked={Boolean(draft.enable_badges_emotes)} onChange={(value) => onChange("enable_badges_emotes", value)} />
         <Toggle label="Auto-farm free badges" description="When priority work is idle, farm watch-time badge rewards. Subscription badges are skipped." checked={Boolean(draft.auto_farm_badges)} onChange={(value) => onChange("auto_farm_badges", value)} />
+        <Toggle label="Skip drops that cannot finish" description="Skip a reward when its remaining watch time exceeds the time left before expiry. Continue with the next eligible reward or category." checked={Boolean(draft.skip_unfinishable_drops)} onChange={(value) => onChange("skip_unfinishable_drops", value)} />
         <Toggle label="Extra availability check" description="Run the additional Twitch availability lookup." checked={Boolean(draft.available_drops_check)} onChange={(value) => onChange("available_drops_check", value)} />
         <Toggle label="Trust allowed channels" description="Use a campaign's explicit channel list when Twitch's availability lookup omits it." checked={Boolean(draft.trust_allowed_channels)} onChange={(value) => onChange("trust_allowed_channels", value)} />
       </SettingsGroup>
+      </TabsContent>
+      <TabsContent value="connection">
       <SettingsGroup title="Connection" icon={<GlobeIcon />}>
         <Field label="Proxy URL" description="Optional HTTP or HTTPS proxy. Restart the miner after changing it."><Input value={draft.proxy || ""} placeholder="https://proxy.example:8080" onChange={(event) => onChange("proxy", event.target.value)} /></Field>
         <Field label="Language" description="Used for miner status messages after restart."><select className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm" value={draft.language || "English"} onChange={(event) => onChange("language", event.target.value)}>{(draft.languages || ["English"]).map((language) => <option key={language}>{language}</option>)}</select></Field>
         <Field label={`Connection quality: ${draft.connection_quality || 1}`} description="Higher values use longer network timeouts for slower connections."><input className="w-full accent-[var(--primary)]" type="range" min="1" max="6" value={draft.connection_quality || 1} onChange={(event) => onChange("connection_quality", Number(event.target.value))} /></Field>
       </SettingsGroup>
+      </TabsContent>
+      <TabsContent value="notifications">
       <SettingsGroup title="Discord notifications" icon={<DiscordLogoIcon />}>
         <div className="rounded-xl bg-muted p-4">
           <div className="flex items-center justify-between gap-4"><div><p className="text-sm font-medium">{notifications.webhook_label || "Not configured"}</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">The saved token stays on this server and is never returned to the browser.</p></div><Badge variant="secondary" className={notifications.configured ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}>{notifications.configured ? "Configured" : "Not configured"}</Badge></div>
         </div>
         <Field label="Webhook URL" description="Paste an official Discord channel webhook. Saving a blank field keeps the existing URL."><Input type="password" autoComplete="off" value={notificationDraft.webhook_url} placeholder={notifications.configured ? "Saved webhook is hidden" : "https://discord.com/api/webhooks/..."} onChange={(event) => onNotificationChange("webhook_url", event.target.value)} /></Field>
-        <Toggle label="Enable notifications" description="Send messages only for categories in the priority list." checked={notificationDraft.enabled} onChange={(value) => onNotificationChange("enabled", value)} />
-        <Toggle label="Earned Drops" description="Notify when watch requirements finish, including delivery status and reward art." checked={notificationDraft.notify_claimed} onChange={(value) => onNotificationChange("notify_claimed", value)} />
+        <Toggle label="Enable notifications" description="Drop events follow priorities, plus auto-farmed free badges. Auth and operational alerts are server-wide." checked={notificationDraft.enabled} onChange={(value) => onNotificationChange("enabled", value)} />
+        <Toggle label="Earned Drops and badges" description="Notify when watch requirements finish, including auto-farmed free badges, delivery status, and reward art." checked={notificationDraft.notify_claimed} onChange={(value) => onNotificationChange("notify_claimed", value)} />
         <Toggle label="New priority Drops" description="Send one structured message when new rewards are detected." checked={notificationDraft.notify_new_drops} onChange={(value) => onNotificationChange("notify_new_drops", value)} />
         <Toggle label="Mining status" description="Report start, recovery, completion, and priority-channel problems." checked={notificationDraft.notify_status} onChange={(value) => onNotificationChange("notify_status", value)} />
         <Toggle label="Operational alerts" description="Optional global crash and Twitch verification alerts. These are not category-specific." checked={notificationDraft.notify_operational} onChange={(value) => onNotificationChange("notify_operational", value)} />
+        <Toggle label="Twitch authentication alerts" description="Notify when login expires, verification fails, or authorization cannot connect. Includes recovery messages; retries are deduplicated." checked={notificationDraft.notify_auth} onChange={(value) => onNotificationChange("notify_auth", value)} />
         {notificationMessage && <p className="text-sm text-emerald-600 dark:text-emerald-400" role="status">{notificationMessage}</p>}
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
           <Button disabled={!notificationDirty || busy.startsWith("notifications")} onClick={onSaveNotifications}><FloppyDiskIcon />{busy === "notifications" ? "Saving" : "Save webhook"}</Button>
@@ -554,12 +585,18 @@ function SettingsPanel({ draft, dirty, busy, session, notifications, notificatio
           <Button variant="ghost" className="text-destructive hover:text-destructive" disabled={!notifications.configured || busy.startsWith("notifications")} onClick={onRemoveNotifications}><TrashIcon />{busy === "notifications-remove" ? "Removing" : "Remove"}</Button>
         </div>
       </SettingsGroup>
+      </TabsContent>
+      <TabsContent value="security">
       <SettingsGroup title="Security" icon={<KeyIcon />}>
-        <p className="text-sm leading-relaxed text-muted-foreground">Changing the admin password revokes every browser session. Invalidating Twitch auth removes the saved Twitch token and pauses mining until another browser token is imported.</p>
-        <div className="flex flex-wrap gap-2"><PasswordDialog session={session} onSignedOut={onSignedOut} /><ImportTokenDialog busy={busy === "import-token"} onImport={onImport} /><ResetTwitchDialog busy={busy === "invalidate"} onConfirm={onInvalidate} /></div>
+        <div className="flex flex-col items-start justify-between gap-4 sm:flex-row"><div className="max-w-xl"><h3 className="text-sm font-medium">Administrator password</h3><p className="mt-1 text-sm leading-relaxed text-muted-foreground">Protect access to this dashboard. Changing the password signs out every website session without stopping the miner.</p></div><div className="shrink-0"><PasswordDialog session={session} onSignedOut={onSignedOut} /></div></div>
+        <Separator />
+        <div><h3 className="text-sm font-medium">Twitch authorization</h3><p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">Device login needs no browser on this server. Saved sessions survive updates; if Twitch revokes access, activate a new code. Browser token import may require Chromium.</p><div className="mt-4 flex flex-wrap gap-2"><DeviceLoginDialog busy={!!busy} onConfirm={onDeviceLogin} /><ImportTokenDialog busy={busy === "import-token"} onImport={onImport} /></div></div>
+        <Separator />
+        <div className="flex flex-col items-start justify-between gap-4 sm:flex-row"><div className="max-w-xl"><h3 className="text-sm font-medium">Reset Twitch session</h3><p className="mt-1 text-sm leading-relaxed text-muted-foreground">Remove the miner's saved authorization and sign in again. This does not log you out of Twitch in your browser.</p></div><div className="shrink-0"><ResetTwitchDialog busy={busy === "invalidate"} onConfirm={onInvalidate} /></div></div>
       </SettingsGroup>
-    </div>
-  </PageFrame>
+      </TabsContent>
+    </PageFrame>
+  </Tabs>
 }
 
 function SettingsGroup({ title, icon, children }: { title: string; icon: ReactNode; children: ReactNode }) { return <div className="rounded-2xl border border-border bg-card p-5"><div className="mb-5 flex items-center gap-2"><span className="text-primary">{icon}</span><h2 className="font-semibold">{title}</h2></div><div className="space-y-5">{children}</div></div> }
@@ -578,7 +615,11 @@ function PasswordDialog({ session, onSignedOut }: { session: SessionMeta; onSign
 }
 
 function ResetTwitchDialog({ busy, onConfirm }: { busy: boolean; onConfirm: () => void }) {
-  return <Dialog><DialogTrigger render={<Button variant="destructive" disabled={busy} />}>Reset Twitch login</DialogTrigger><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Reset Twitch login?</DialogTitle><DialogDescription>This removes the saved Twitch authorization. Mining pauses until you import another browser auth-token.</DialogDescription></DialogHeader><DialogFooter><DialogClose render={<Button variant="outline" />}>Cancel</DialogClose><DialogClose render={<Button variant="destructive" onClick={onConfirm} />}>Reset Twitch login</DialogClose></DialogFooter></DialogContent></Dialog>
+  return <Dialog><DialogTrigger render={<Button variant="destructive" disabled={busy} />}>Reset Twitch login</DialogTrigger><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Reset Twitch login?</DialogTitle><DialogDescription>This removes the current login method's saved Twitch session. Device login will show a new activation code; browser login will require another token. This does not revoke your Twitch browser login.</DialogDescription></DialogHeader><DialogFooter><DialogClose render={<Button variant="outline" />}>Cancel</DialogClose><DialogClose render={<Button variant="destructive" onClick={onConfirm} />}>Reset Twitch login</DialogClose></DialogFooter></DialogContent></Dialog>
+}
+
+function DeviceLoginDialog({ busy, onConfirm }: { busy: boolean; onConfirm: () => void }) {
+  return <Dialog><DialogTrigger render={<Button variant="outline" disabled={busy} />}><KeyIcon />Device login</DialogTrigger><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Use browser-free Twitch login?</DialogTitle><DialogDescription>The miner will restart in device mode. Activate the code using Twitch on any phone or computer, then close that browser. No browser runs on this server. Your saved browser cookies are kept separately.</DialogDescription></DialogHeader><p className="text-sm leading-relaxed text-muted-foreground">If Twitch revokes this session, you must activate a new code. Automatic token renewal is not guaranteed.</p><DialogFooter><DialogClose render={<Button variant="outline" />}>Cancel</DialogClose><DialogClose render={<Button onClick={onConfirm} />}>Use device login</DialogClose></DialogFooter></DialogContent></Dialog>
 }
 
 function ImportTokenDialog({ busy, onImport }: { busy: boolean; onImport: (token: string) => Promise<boolean> }) {
@@ -592,5 +633,11 @@ function ImportTokenDialog({ busy, onImport }: { busy: boolean; onImport: (token
 }
 
 function Logs({ logs }: { logs: string[] }) {
-  return <PageFrame title="Logs" description="The latest 200 miner messages."><div className="scrollbar-theme min-h-80 overflow-auto rounded-2xl border border-border bg-[#171614] p-4 text-stone-300"><pre className="font-mono text-xs leading-6">{logs.length ? logs.join("\n") : "No log messages yet."}</pre></div></PageFrame>
+  const [query, setQuery] = useState("")
+  const [filter, setFilter] = useState<LogFilter>("All")
+  const visible = useMemo(() => filterLogs(logs, filter, query), [logs, filter, query])
+  const controls = <div className="flex gap-2"><div className="relative min-w-0 flex-1"><MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" /><Input aria-label="Search logs" className="h-9 pl-9 sm:w-64" placeholder="Search logs" value={query} onChange={(event) => setQuery(event.target.value)} /></div><select aria-label="Log category" className="h-9 min-w-0 rounded-lg border border-input bg-background px-2 text-sm" value={filter} onChange={(event) => setFilter(event.target.value as LogFilter)}>{(["All", "Errors", ...logCategories] as LogFilter[]).map((category) => <option key={category}>{category}</option>)}</select></div>
+  return <PageFrame title="Logs" description={`Newest first · ${visible.length} of ${logs.length} buffered messages`} actions={controls}>
+    <div className="overflow-hidden rounded-2xl border border-border bg-card">{visible.length ? visible.map((entry) => <div key={`${entry.index}-${entry.message}`} className="flex flex-col items-start gap-2 border-b border-border/60 px-4 py-3 last:border-0 sm:flex-row sm:gap-4"><Badge variant="secondary" className={cn("shrink-0 sm:w-28 sm:justify-center", entry.error && "text-destructive")}>{entry.category}</Badge><pre className={cn("min-w-0 whitespace-pre-wrap break-words font-mono text-xs leading-6", entry.error ? "text-destructive" : "text-foreground/85")}>{entry.message}</pre></div>) : <p className="p-8 text-center text-sm text-muted-foreground">{logs.length ? "No messages match your filters." : "No log messages yet."}</p>}</div>
+  </PageFrame>
 }

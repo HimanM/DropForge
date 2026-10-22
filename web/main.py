@@ -39,6 +39,7 @@ def provision() -> int:
     if not store.provision(password, recovery):
         print("Web authentication is already provisioned. Existing credentials were preserved.")
         return 0
+    store.update_settings({"twitch_login_method": "device"})
     print("Web authentication provisioned.")
     print(f"Admin password: {password}")
     print(f"Recovery code: {recovery}")

@@ -7,13 +7,26 @@ from yarl import URL
 
 from core.constants import LANG_PATH
 from core.translate import _
-from tui.manager import TUIChannels, TUIInventory, TUIManager
+from tui.manager import TUIChannels, TUIInventory, TUILogin, TUIManager
 
 if TYPE_CHECKING:
     from models.inventory import DropsCampaign, TimedDrop
     from models.channel import Channel
     from network.twitch import Twitch
     from web.discord import DiscordNotifier
+
+
+class WebLogin(TUILogin):
+    def update(self, status: str, user_id: int | None) -> None:
+        super().update(status, user_id)
+        notifier = self._manager.notifier
+        if user_id is not None and notifier is not None and notifier.auth_alert().get("kind") not in {"permissions", "verification", "login_error"}:
+            notifier.auth_recovered()
+
+    async def ask_auth_token(self) -> str:
+        if self._manager.notifier is not None:
+            self._manager.notifier.auth_issue("login_required", "The browser session needs authorization. Open DropForge to import a token or select Device login.")
+        return await super().ask_auth_token()
 
 
 class WebInventory(TUIInventory):
@@ -37,7 +50,8 @@ class WebInventory(TUIInventory):
         super().update_drop(drop)
         if self._manager.notifier is not None:
             self._manager.notifier.drop_updated(
-                drop, list(self._manager._twitch.settings.priority)
+                drop, list(self._manager._twitch.settings.priority),
+                auto_farm_badges=bool(self._manager._twitch.settings.auto_farm_badges),
             )
 
 
@@ -52,6 +66,7 @@ class WebManager(TUIManager):
     def __init__(self, twitch: Twitch, notifier: DiscordNotifier | None = None) -> None:
         super().__init__(twitch)
         self.notifier = notifier
+        self.login = WebLogin(self)
         self.inv = WebInventory(self)
         self.channels = WebChannels(self)
         self._selected_channel_id: str | None = None
@@ -76,6 +91,7 @@ class WebManager(TUIManager):
 
     def print(self, message: str) -> None:
         super().print(message)
+        print(message, flush=True)
         if self.notifier is not None and message == _("status", "no_channel"):
             self.notifier.idle(self)
         elif self.notifier is not None and message.startswith(
@@ -114,6 +130,8 @@ class WebManager(TUIManager):
             self._set_badges_emotes(payload["enable_badges_emotes"])
         if "auto_farm_badges" in payload:
             self._set_auto_farm_badges(payload["auto_farm_badges"])
+        if "skip_unfinishable_drops" in payload:
+            self._set_skip_unfinishable_drops(payload["skip_unfinishable_drops"])
         settings = self._twitch.settings
         restart_keys = {"proxy", "language", "connection_quality"}
         channel_keys = {"available_drops_check", "trust_allowed_channels"}
@@ -127,14 +145,18 @@ class WebManager(TUIManager):
 
     @staticmethod
     def _drop(drop: TimedDrop) -> dict[str, Any]:
+        receipts = getattr(drop.campaign._twitch, "pending_claims", None)
+        pending = receipts is not None and receipts.pending(drop)
         return {
             "id": drop.id,
             "name": drop.name,
             "progress": drop.progress,
             "current_minutes": drop.current_minutes,
             "required_minutes": drop.required_minutes,
-            "claimed": drop.is_claimed,
+            "claimed": drop.is_claimed and not pending,
+            "claim_pending": pending,
             "earned": drop.is_earned,
+            "is_free_badge": drop.is_free_badge,
             "claimable": drop.can_claim,
             "starts": drop.starts_at.isoformat(),
             "ends": drop.ends_at.isoformat(),
@@ -184,6 +206,7 @@ class WebManager(TUIManager):
                 "farm_unlinked": self.state.farm_unlinked,
                 "enable_badges_emotes": self.state.enable_badges_emotes,
                 "auto_farm_badges": self.state.auto_farm_badges,
+                "skip_unfinishable_drops": self.state.skip_unfinishable_drops,
                 "available_drops_check": bool(self._twitch.settings.available_drops_check),
                 "trust_allowed_channels": bool(
                     getattr(self._twitch.settings, "trust_allowed_channels", False)

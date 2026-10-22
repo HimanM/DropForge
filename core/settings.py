@@ -22,6 +22,7 @@ class SettingsFile(TypedDict):
     tray_notifications: bool
     enable_badges_emotes: bool
     auto_farm_badges: bool
+    skip_unfinishable_drops: bool
     completed_badges: set[str]
     available_drops_check: bool
     trust_allowed_channels: bool
@@ -40,6 +41,7 @@ default_settings: SettingsFile = {
     "tray_notifications": True,
     "enable_badges_emotes": False,
     "auto_farm_badges": False,
+    "skip_unfinishable_drops": False,
     "completed_badges": set(),
     "available_drops_check": False,
     "trust_allowed_channels": False,
@@ -68,6 +70,7 @@ class Settings:
     tray_notifications: bool
     enable_badges_emotes: bool
     auto_farm_badges: bool
+    skip_unfinishable_drops: bool
     completed_badges: set[str]
     available_drops_check: bool
     trust_allowed_channels: bool

@@ -1,6 +1,8 @@
 import asyncio
+import io
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from unittest.mock import AsyncMock, patch
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,7 +10,7 @@ from types import SimpleNamespace
 from aiohttp.test_utils import TestClient, TestServer
 
 from web.auth import AuthStore
-from web.main import _password
+from web.main import _password, provision
 from web.controller import MinerController
 from web.server import create_app
 
@@ -42,6 +44,20 @@ class AuthStoreTests(unittest.TestCase):
 
 
 class PasswordPromptTests(unittest.TestCase):
+    def test_fresh_web_install_uses_device_login_and_updates_preserve_existing_auth(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, patch("web.main.WORKING_DIR", Path(directory)), patch.dict(
+            "os.environ", {"TDMINER_ADMIN_PASSWORD": "correct horse battery", "TDMINER_RECOVERY_CODE": "test-recovery-long-enough"}
+        ), redirect_stdout(io.StringIO()):
+            self.assertEqual(provision(), 0)
+            store = AuthStore(Path(directory, "web-auth.sqlite3"))
+            self.assertEqual(store.get_settings({"twitch_login_method": "browser"})["twitch_login_method"], "device")
+            token, session = store.create_session()
+            store.update_settings({"twitch_login_method": "browser"})
+            self.assertEqual(provision(), 0)
+            self.assertTrue(store.verify_password("correct horse battery"))
+            self.assertEqual(store.get_session(token), session)
+            self.assertEqual(store.get_settings({"twitch_login_method": "device"})["twitch_login_method"], "browser")
+
     def test_short_password_exits_without_reaching_confirmation(self) -> None:
         with patch("web.main.getpass.getpass", return_value="short"):
             with self.assertRaisesRegex(SystemExit, "Invalid password: Password must be at least 12"):

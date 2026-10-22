@@ -1124,6 +1124,11 @@ class Twitch:
                 # if the channel isn't online anymore, we stop watching it
                 self.stop_watching()
                 continue
+            if getattr(self.settings, "skip_unfinishable_drops", False) and not self.can_watch(channel):
+                self.print(f"No finishable drops remain on {channel.name}; checking the next category.")
+                self.stop_watching()
+                self.change_state(State.GAMES_UPDATE)
+                continue
             stream = channel._stream
             started = monotonic()
             succeeded: bool = await channel.send_watch()

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from datetime import datetime, timedelta, timezone
+from time import time
 from typing import Any, TYPE_CHECKING
 from urllib.parse import urlsplit, urlunsplit
 
@@ -29,6 +31,7 @@ _DEFAULTS = {
     "discord_new_drops": "1",
     "discord_status": "1",
     "discord_operational": "0",
+    "discord_auth": "1",
     "discord_baseline": "0",
 }
 
@@ -83,6 +86,7 @@ class DiscordNotifier:
             "notify_new_drops": settings["discord_new_drops"] == "1",
             "notify_status": settings["discord_status"] == "1",
             "notify_operational": settings["discord_operational"] == "1",
+            "notify_auth": settings["discord_auth"] == "1",
         }
 
     def update(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -92,6 +96,7 @@ class DiscordNotifier:
             "notify_new_drops": "discord_new_drops",
             "notify_status": "discord_status",
             "notify_operational": "discord_operational",
+            "notify_auth": "discord_auth",
         }
         updates: dict[str, str | None] = {}
         if "webhook_url" in payload:
@@ -114,6 +119,9 @@ class DiscordNotifier:
         if next_enabled == "1" and not next_url:
             raise ValueError("Add a Discord webhook URL before enabling notifications.")
         self.store.update_settings(updates)
+        alert = self.auth_alert()
+        if alert and not alert.get("notified"):
+            self.auth_issue(alert["kind"], alert["message"], requires_login=alert["requires_login"])
         return self.snapshot()
 
     async def test(self) -> None:
@@ -149,18 +157,20 @@ class DiscordNotifier:
         if baseline and new_drops and campaign.game.name in priority and self._enabled("new_drops"):
             self._schedule(self._new_drops_payload(campaign, new_drops))
 
-    def drop_updated(self, drop: TimedDrop, priority: list[str]) -> None:
+    def drop_updated(self, drop: TimedDrop, priority: list[str], *, auto_farm_badges: bool = False) -> None:
         campaign = drop.campaign
-        if (drop.is_claimed or drop.is_earned) and self.store.claim_notification_event(
-            f"discord:claimed:{drop.id}"
+        selected = campaign.game.name in priority
+        if (
+            (selected or auto_farm_badges and drop.is_free_badge)
+            and self._enabled("claimed")
+            and (drop.is_claimed or drop.is_earned)
+            and self.store.claim_notification_event(f"discord:claimed:{drop.id}")
         ):
-            if campaign.game.name in priority and self._enabled("claimed"):
-                self._schedule(self._claimed_payload(drop))
-        if campaign.finished and self.store.claim_notification_event(
+            self._schedule(self._claimed_payload(drop))
+        if selected and self._enabled("status") and campaign.finished and self.store.claim_notification_event(
             f"discord:complete:{campaign.id}"
         ):
-            if campaign.game.name in priority and self._enabled("status"):
-                self._schedule(self._campaign_complete_payload(campaign))
+            self._schedule(self._campaign_complete_payload(campaign))
 
     def idle(self, manager: WebManager) -> None:
         priority = list(manager._twitch.settings.priority)
@@ -224,7 +234,8 @@ class DiscordNotifier:
 
     def badge_farming_started(self, manager: WebManager, games: list[Any]) -> None:
         priority = set(manager._twitch.settings.priority)
-        categories = tuple(game.name for game in games if game.name in priority)
+        auto_badges = bool(getattr(manager._twitch.settings, "auto_farm_badges", False))
+        categories = tuple(sorted({game.name for game in games if auto_badges or game.name in priority}))
         if not categories or not self._enabled("status"):
             return
         key = f"discord:badge-fallback:{'|'.join(categories)}"
@@ -237,13 +248,15 @@ class DiscordNotifier:
             ),
             None,
         )
-        self._schedule(self._status_payload(
+        embed = self._embed(
             "Free badge fallback active",
             "Priority mining is idle, so DropForge is farming eligible watch-time badges.",
-            categories,
             _ORANGE,
-            image=_image(campaign.image_url) if campaign else None,
-        ))
+            fields=[("Badge categories", ", ".join(categories))],
+            thumbnail=_image(campaign.image_url) if campaign else None,
+        )
+        embed["footer"] = {"text": "DropForge | Free badges"}
+        self._schedule(self._payload([embed]))
 
     def miner_stopped(self, manager: WebManager) -> None:
         drop = manager.progress._drop
@@ -267,6 +280,48 @@ class DiscordNotifier:
             )
         ):
             self._schedule(self._payload([self._embed(title, detail, _RED)]))
+
+    def auth_alert(self) -> dict[str, Any]:
+        try:
+            alert = json.loads(self.store.get_settings({"twitch_auth_alert": "{}"})["twitch_auth_alert"])
+            return alert if isinstance(alert, dict) else {}
+        except ValueError:
+            return {}
+
+    def auth_issue(self, kind: str, message: str, *, requires_login: bool = True, notify: bool = True) -> None:
+        previous = self.auth_alert()
+        if previous.get("requires_login") and not requires_login:
+            return
+        same = previous.get("kind") == kind
+        alert = {"kind": kind, "message": message, "requires_login": requires_login,
+                 "since": previous["since"] if same else int(time()),
+                 "notified": previous.get("notified", False) if same else False}
+        if notify and self._enabled("auth") and self.store.claim_notification_event(
+            f"discord:auth:{kind}", cooldown=6 * 60 * 60
+        ):
+            title = "Twitch login required" if requires_login else "Twitch authentication problem"
+            action = "Open DropForge through your SSH tunnel, then Overview to sign in." if requires_login else "Open DropForge Logs. Saved credentials are retained while the miner retries."
+            embed = self._embed(title, message, _RED, fields=[
+                ("Status", "Needs login" if requires_login else "Retrying automatically"),
+                ("Next action", action),
+            ])
+            embed["footer"] = {"text": "DropForge | Authentication"}
+            self._schedule(self._payload([embed]))
+            alert["notified"] = True
+        if alert != previous:
+            self.store.update_settings({"twitch_auth_alert": json.dumps(alert)})
+
+    def auth_recovered(self) -> None:
+        alert = self.auth_alert()
+        if not alert:
+            return
+        self.store.update_settings({"twitch_auth_alert": None})
+        self.store.forget_notification_event(f"discord:auth:{alert['kind']}")
+        if alert.get("notified") and self._enabled("auth"):
+            embed = self._embed("Twitch authentication restored",
+                                "DropForge authenticated successfully. Mining can resume without another login.", _GREEN)
+            embed["footer"] = {"text": "DropForge | Authentication"}
+            self._schedule(self._payload([embed]))
 
     def _enabled(self, event: str) -> bool:
         settings = self._settings()
@@ -359,7 +414,7 @@ class DiscordNotifier:
             "DropForge found new rewards for a category in your priority list.",
             _ORANGE,
             fields=fields,
-            image=_image(campaign.image_url),
+            thumbnail=_image(campaign.image_url),
             url=str(campaign.link_url),
         )]
         embeds.extend(self._drop_embed(drop) for drop in drops[:9])
@@ -375,37 +430,47 @@ class DiscordNotifier:
             fields=[
                 ("Watch time", f"{drop.required_minutes} minutes"),
                 ("Available until", drop.ends_at.astimezone().strftime("%Y-%m-%d %H:%M %Z")),
-            ],
-            thumbnail=thumbnail,
+            ] + ([("Reward image", f"[Open reward image]({thumbnail})")] if thumbnail else []),
+            image=thumbnail,
+            thumbnail=_image(drop.campaign.image_url),
         )
 
     def _claimed_payload(self, drop: TimedDrop) -> dict[str, Any]:
         campaign = drop.campaign
+        receipts = getattr(getattr(campaign, "_twitch", None), "pending_claims", None)
+        pending = receipts is not None and receipts.pending(drop)
         reward = ", ".join(benefit.name for benefit in drop.benefits) or drop.name
         thumbnail = next((_image(benefit.image_url) for benefit in drop.benefits if _image(benefit.image_url)), None)
         title = (
             "Free badge earned"
             if drop.is_free_badge
-            else "Drop claimed" if drop.is_claimed else "Drop earned"
+            else "Drop claimed" if drop.is_claimed and not pending else "Drop earned"
         )
         fields = [
             ("Category", campaign.game.name),
             ("Campaign", campaign.name),
             ("Campaign progress", f"{campaign.completed_drops}/{campaign.total_drops} Drops earned"),
         ]
-        if not drop.is_claimed:
+        if thumbnail:
+            fields.append(("Reward image", f"[Open reward image]({thumbnail})"))
+        if pending:
+            fields.append(("Delivery", "Claim accepted; awaiting Twitch confirmation. Link your game account if required."))
+        elif not drop.is_claimed:
             fields.append(
                 ("Delivery", "Watch requirement complete. Link or claim it in Twitch if required.")
             )
-        return self._payload([self._embed(
+        embed = self._embed(
             title,
             reward,
             _GREEN,
             fields=fields,
-            image=_image(campaign.image_url),
-            thumbnail=thumbnail,
+            image=thumbnail,
+            thumbnail=_image(campaign.image_url),
             url=str(campaign.link_url),
-        )])
+        )
+        if drop.is_free_badge:
+            embed["footer"] = {"text": "DropForge | Free badges"}
+        return self._payload([embed])
 
     def _campaign_complete_payload(self, campaign: DropsCampaign) -> dict[str, Any]:
         return self._payload([self._embed(

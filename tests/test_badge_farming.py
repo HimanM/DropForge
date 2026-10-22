@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from core.constants import State
 from models.inventory import DropsCampaign
 from network.twitch import Twitch
+from web.manager import WebManager
 
 
 def _stamp(value: datetime) -> str:
@@ -93,6 +94,13 @@ class BadgeFarmingTests(unittest.TestCase):
         watch = campaign.get_drop("watch-badge")
         assert watch is not None
         self.assertTrue(watch.is_claimed)
+
+    def test_web_snapshot_marks_only_positive_time_badges_as_free(self) -> None:
+        campaign = _campaign(self.twitch)
+        snapshots = {drop.id: WebManager._drop(drop) for drop in campaign.drops}
+        self.assertTrue(snapshots["watch-badge"]["is_free_badge"])
+        self.assertFalse(snapshots["subscription-badge"]["is_free_badge"])
+        self.assertFalse(snapshots["item"]["is_free_badge"])
 
     def test_verified_watch_completion_stops_farming_without_claim(self) -> None:
         campaign = _campaign(self.twitch)

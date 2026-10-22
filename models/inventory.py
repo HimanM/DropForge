@@ -305,11 +305,18 @@ class TimedDrop(BaseDrop):
             super()._base_earn_conditions()
             and self.required_minutes > 0
             and not self.is_earned
+            and (not getattr(self._twitch.settings, "skip_unfinishable_drops", False) or self.can_finish)
             and (not self._twitch.badge_farming or self.is_free_badge)
             # NOTE: This may be a bad idea, as it invalidates the can_earn status
             # and provides no way to recover from this state until the next reload.
             and self.extra_current_minutes < MAX_EXTRA_MINUTES
         )
+
+    @property
+    def can_finish(self) -> bool:
+        start = max(datetime.now(timezone.utc), self.starts_at, self.campaign.starts_at)
+        end = min(self.ends_at, self.campaign.ends_at)
+        return timedelta(minutes=max(0, self.remaining_minutes)) <= end - start
 
     def _on_state_changed(self) -> None:
         self._twitch.gui.inv.update_drop(self)

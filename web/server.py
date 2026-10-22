@@ -98,7 +98,7 @@ def create_app(auth_path: Path, static_path: Path, *, auto_start: bool = True) -
     app = web.Application(client_max_size=64 * 1024)
     app["auth"] = AuthStore(auth_path)
     app["notifier"] = DiscordNotifier(app["auth"])
-    app["controller"] = MinerController(app["notifier"])
+    app["controller"] = MinerController(app["notifier"], app["auth"])
     app["limiter"] = LoginLimiter()
     app["static_path"] = static_path.resolve()
 
@@ -243,6 +243,13 @@ def create_app(auth_path: Path, static_path: Path, *, auto_start: bool = True) -
             return _json_error("Twitch token validation failed. The saved session was not changed.", 502)
         return web.json_response({"ok": True, **result})
 
+    async def device_login(request: web.Request) -> web.Response:
+        session = await _session(request, csrf=True)
+        if isinstance(session, web.Response):
+            return session
+        await request.app["controller"].use_device_login()
+        return web.json_response({"ok": True, "login_method": "device"})
+
     async def miner_action(request: web.Request) -> web.Response:
         session = await _session(request, csrf=True)
         if isinstance(session, web.Response):
@@ -297,6 +304,7 @@ def create_app(auth_path: Path, static_path: Path, *, auto_start: bool = True) -
                 "farm_unlinked",
                 "enable_badges_emotes",
                 "auto_farm_badges",
+                "skip_unfinishable_drops",
                 "trust_allowed_channels",
             ):
                 if key in body:
@@ -378,6 +386,7 @@ def create_app(auth_path: Path, static_path: Path, *, auto_start: bool = True) -
     app.router.add_post("/api/miner/start", miner_start)
     app.router.add_post("/api/miner/stop", miner_stop)
     app.router.add_post("/api/twitch/import-token", import_twitch_token)
+    app.router.add_post("/api/twitch/device-login", device_login)
     app.router.add_post("/api/miner/{action}", miner_action)
     app.router.add_post("/api/channels/select", select_channel)
     app.router.add_put("/api/settings", update_settings)

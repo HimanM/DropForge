@@ -166,6 +166,7 @@ class TwitchDropsTUI(App[None]):
         on_set_farm_unlinked: abc.Callable[[bool], None],
         on_set_badges_emotes: abc.Callable[[bool], None],
         on_set_auto_farm_badges: abc.Callable[[bool], None],
+        on_set_skip_unfinishable_drops: abc.Callable[[bool], None],
         on_set_trust_allowed_channels: abc.Callable[[bool], None],
         on_invalidate_auth: abc.Callable[[], None] = lambda: None,
         on_ready: abc.Callable[[], None] | None = None,
@@ -187,6 +188,7 @@ class TwitchDropsTUI(App[None]):
         self._on_set_farm_unlinked = on_set_farm_unlinked
         self._on_set_badges_emotes = on_set_badges_emotes
         self._on_set_auto_farm_badges = on_set_auto_farm_badges
+        self._on_set_skip_unfinishable_drops = on_set_skip_unfinishable_drops
         self._on_set_trust_allowed_channels = on_set_trust_allowed_channels
         self._on_ready = on_ready or (lambda: None)
         self._ready_for_refresh = False
@@ -249,6 +251,10 @@ class TwitchDropsTUI(App[None]):
                                 "auto-farm free badges when idle",
                                 id="auto-farm-badges",
                                 compact=True,
+                            )
+                            yield Checkbox(
+                                "skip drops that cannot finish before expiry",
+                                id="skip-unfinishable-drops", compact=True,
                             )
                             yield Checkbox(
                                 "trust allowed channels",
@@ -489,6 +495,9 @@ class TwitchDropsTUI(App[None]):
             auto_farm_badges.value = self.state.auto_farm_badges
 
         trust_allowed = self._widget("#trust-allowed-channels", Checkbox)
+        skip_unfinishable = self._widget("#skip-unfinishable-drops", Checkbox)
+        if skip_unfinishable is not None:
+            skip_unfinishable.value = self.state.skip_unfinishable_drops
         if trust_allowed is not None:
             trust_allowed.value = self.state.trust_allowed_channels
 
@@ -627,6 +636,10 @@ class TwitchDropsTUI(App[None]):
         if checkbox_id == "trust-allowed-channels":
             if event.value != self.state.trust_allowed_channels:
                 self._on_set_trust_allowed_channels(event.value)
+            return
+        if checkbox_id == "skip-unfinishable-drops":
+            if event.value != self.state.skip_unfinishable_drops:
+                self._on_set_skip_unfinishable_drops(event.value)
             return
         filters = self.state.campaign_filters
         if checkbox_id == "filter-not-linked":

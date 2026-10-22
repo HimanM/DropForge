@@ -112,7 +112,17 @@ printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> ~/.profile
 
 ### Connect Twitch
 
-Twitch retired the password endpoint used by older miners, and its device-code tokens may be rejected by the Drops API. DropForge imports a browser session instead and never asks for your Twitch password.
+For small Linux servers, choose **Device login** in Overview or Settings. Open the activation link on any phone or computer, enter the displayed code, and authorize Twitch for TV. You can close that browser afterward: no Chromium, desktop helper, VPN exit node, or ongoing connection to your PC is needed by the server.
+
+This is an optional, web-only login method. Campaign discovery uses the existing public catalogue; Twitch remains authoritative for watch progress and claim confirmation. Desktop GUI/TUI login is unchanged. Device credentials are stored separately in `web-device-session.json`, while browser cookies and settings are preserved across updates. The server checks the device token at startup and hourly and retains it through temporary connection failures.
+
+Authentication problems appear in a persistent banner on every web page, including a quick activation link when login is needed. In **Settings → Discord notifications**, enable your webhook and **Twitch authentication alerts** to receive server-wide expiry, verification, prolonged connection-failure, and recovery messages. Repeated retries are deduplicated; temporary failures do not erase the saved session. The webhook does not receive tokens, cookies, or activation codes.
+
+**Session lifetime:** the tested TV client advertises no scheduled expiry, but Twitch can revoke it. Automatic refresh is not guaranteed (Twitch currently requires a client secret for this client's refresh token). If activation is required again, open DropForge and approve a fresh code on any device. Reset Twitch login removes only the active login method's saved session; it does not revoke your Twitch website login.
+
+Web installs no longer install a browser by default. To use browser-token import instead, install Chrome/Chromium and Xvfb yourself, or rerun the installer with `TDMINER_INSTALL_BROWSER=1`. Existing browsers are not removed. Docker's standard image still bundles Chromium for browser-token compatibility; device mode does not launch it.
+
+Browser-token import remains available and never asks for your Twitch password:
 
 1. Sign in at [twitch.tv](https://www.twitch.tv/) on a desktop browser.
 2. Open the browser developer tools.
@@ -161,6 +171,15 @@ curl -fsSL https://raw.githubusercontent.com/HimanM/DropForge/main/scripts/insta
 | `tdminer-web logs` | Follow service logs |
 | `tdminer-web reset-password` | Set a new admin password and revoke browser sessions |
 | `tdminer-web import-twitch-token` | Replace the saved Twitch session |
+
+The installer creates and enables **`tdminer-web.service`** automatically. Fresh web installs use browser-free device activation; updates retain the existing login method and session. Miner messages and server errors go to the system journal:
+
+```sh
+sudo systemctl status tdminer-web.service --no-pager
+sudo journalctl -u tdminer-web.service -f
+# Recent service logs:
+sudo journalctl -u tdminer-web.service -n 200 --no-pager
+```
 
 Logging out of the website clears only the web browser session. It does not stop the miner or sign the saved Twitch session out.
 
@@ -291,9 +310,13 @@ tdminer
 - **Trust allowed channels** follows Twitch campaign ACLs. Disable it only when Twitch shows a valid allowed channel but incorrectly marks it as ineligible.
 - **Badge and emote drops** includes those rewards in normal campaign selection.
 - **Auto-farm free badges** runs only when priority work is idle and skips subscription badges.
+- **Skip drops that cannot finish** (off by default) skips a reward when its remaining watch time exceeds the time before the earlier of its own or its campaign's expiry. It still farms other finishable rewards and never blocks completed claims. GUI: Advanced settings; TUI: Settings; CLI: `/skip-unfinishable on|off`; web: Settings → Mining. The estimate assumes one watch minute per real minute and can be affected by delayed Twitch progress.
 - **Priority and excluded games** are managed in the dedicated Games page or the desktop Settings tab.
 - Use **Save and reload** after selection changes so the active inventory is rebuilt immediately.
-- Discord notifications are filtered to priority categories to avoid unrelated campaign spam.
+- Discord Drop notifications follow priority categories. With **Auto-farm free badges** enabled, earned free badges and badge-fallback status are also reported outside the priority list; subscription badges and unrelated item Drops stay filtered out. **Earned Drops and badges** controls completion notifications.
+- In the web **Campaigns** page, choose **Free badges** to browse watch-time badges across categories without changing mining priorities. Zero-minute subscription badges are excluded, and **Finished** shows earned badges even when their campaign still has other rewards.
+- Discord reward messages show the supplied reward image prominently, with category art as a thumbnail and a direct reward-image link.
+- Web logs show newest messages first, with text search, event-category filters and an **Errors** filter. Categories are best-effort labels for the original miner text; the buffer remains the latest 200 messages.
 
 Some campaigns require a linked game account. Manage links at [Twitch Drops campaigns](https://www.twitch.tv/drops/campaigns).
 
@@ -311,6 +334,7 @@ Important files include:
 | Path | Purpose |
 | --- | --- |
 | `cookies.jar` | Twitch session, keep private |
+| `web-device-session.json` | Web-only device session; keep private, survives updates |
 | `cookies.jar.backup` | Last recoverable Twitch session |
 | `settings.json` | Miner, priority, webhook, and interface settings |
 | `web-auth.sqlite3` | Hashed web credentials and browser sessions |
@@ -323,7 +347,7 @@ Back up the data directory or Docker volume while DropForge is stopped. Updates 
 
 - Web passwords and recovery codes are salted and hashed with scrypt.
 - Web session cookies are opaque and HttpOnly.
-- The Twitch `auth-token`, `cookies.jar`, recovery code, and Discord webhook URL are secrets.
+- The Twitch `auth-token`, `cookies.jar`, `web-device-session.json`, recovery code, and Discord webhook URL are secrets.
 - Website logout revokes that browser session but leaves the miner and Twitch session running.
 - Changing the admin password revokes all active web browser sessions.
 - Prefer localhost with Tailscale Serve or an HTTPS reverse proxy over direct public exposure.

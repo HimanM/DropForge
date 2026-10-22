@@ -58,6 +58,7 @@ jobs:
           python3 -m unittest discover -s tests -p "test_frontend_injection.py" -v
           python3 -m unittest discover -s tests -p "test_tui*.py" -v
           python3 -m unittest discover -s tests -p "test_badge_farming.py" -v
+          python3 -m unittest discover -s tests -p "test_drop_deadlines.py" -v
           python3 -m unittest discover -s tests -p "test_twitch_auth.py" -v
           python3 -m unittest discover -s tests -p "test_channel_watch.py" -v
 
@@ -91,6 +92,7 @@ jobs:
         run: |
           python3 -m pip install -r requirements-web.txt
           npm ci --prefix web/frontend
+          npm run test --prefix web/frontend
 
       - name: Build web frontend
         run: |

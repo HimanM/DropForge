@@ -61,6 +61,61 @@ class DiscordNotificationTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
+    def test_auth_alert_persists_and_is_deduplicated_until_recovery(self) -> None:
+        self.notifier.auth_issue("expired", "Twitch session expired. Activate again.")
+        self.notifier.auth_issue("expired", "Twitch session expired. Activate again.")
+        self.assertEqual(len(self.payloads), 1)
+        alert = DiscordNotifier(self.store).auth_alert()
+        self.assertTrue(alert["requires_login"])
+        self.assertTrue(alert["notified"])
+        embed = self.payloads[0]["embeds"][0]
+        self.assertEqual(embed["title"], "Twitch login required")
+        self.assertEqual(embed["footer"]["text"], "DropForge | Authentication")
+        restarted = DiscordNotifier(self.store)
+        restarted._schedule = self.payloads.append
+        restarted.auth_issue("expired", "Twitch session expired. Activate again.")
+        self.assertEqual(len(self.payloads), 1)
+        restarted.auth_recovered()
+        self.assertEqual(restarted.auth_alert(), {})
+        self.assertEqual(len(self.payloads), 2)
+        restarted.auth_issue("expired", "Another session expired.")
+        self.assertEqual(len(self.payloads), 3)
+
+    def test_auth_alert_opt_out_keeps_web_warning_without_discord(self) -> None:
+        self.notifier.update({"notify_auth": False})
+        self.notifier.auth_issue("expired", "Activate again.")
+        self.assertEqual(len(self.payloads), 0)
+        self.assertTrue(self.notifier.auth_alert()["requires_login"])
+        self.notifier.update({"notify_auth": True})
+        self.assertEqual(len(self.payloads), 1)
+
+    def test_brief_connection_warning_does_not_send_recovery_spam(self) -> None:
+        self.notifier.auth_issue("connection", "Retrying authorization.", requires_login=False, notify=False)
+        self.assertFalse(self.notifier.auth_alert()["requires_login"])
+        self.notifier.auth_recovered()
+        self.assertEqual(len(self.payloads), 0)
+
+    def test_connection_warning_does_not_replace_required_login(self) -> None:
+        self.notifier.auth_issue("expired", "Activate again.")
+        self.notifier.auth_issue("connection", "Retrying authorization.", requires_login=False)
+        self.assertEqual(self.notifier.auth_alert()["kind"], "expired")
+        self.assertEqual(len(self.payloads), 1)
+
+    def test_pending_claim_is_not_reported_as_confirmed_delivery(self) -> None:
+        selected = campaign()
+        selected._twitch = SimpleNamespace(pending_claims=SimpleNamespace(pending=lambda _: True))
+        drop = selected.drops[0]
+        drop.is_claimed = True
+        drop.is_earned = True
+        self.notifier.drop_updated(drop, ["Priority Game"])
+        message = self.payloads[0]["embeds"][0]
+        self.assertEqual(message["title"], "Drop earned")
+        self.assertIn("awaiting Twitch confirmation", str(message["fields"]))
+        restarted = DiscordNotifier(self.store)
+        restarted._schedule = self.payloads.append
+        restarted.drop_updated(drop, ["Priority Game"])
+        self.assertEqual(len(self.payloads), 1)
+
     def test_url_is_restricted_and_secret_is_not_returned(self) -> None:
         self.assertEqual(validate_webhook_url(WEBHOOK), WEBHOOK)
         with self.assertRaises(ValueError):
@@ -83,11 +138,12 @@ class DiscordNotificationTests(unittest.TestCase):
         self.assertEqual(len(self.payloads), 1)
         message = self.payloads[0]
         self.assertEqual(message["allowed_mentions"], {"parse": []})
-        self.assertEqual(message["embeds"][0]["image"]["url"], selected.image_url)
+        self.assertEqual(message["embeds"][0]["thumbnail"]["url"], selected.image_url)
         self.assertEqual(
-            message["embeds"][1]["thumbnail"]["url"],
+            message["embeds"][1]["image"]["url"],
             selected.drops[0].benefits[0].image_url,
         )
+        self.assertEqual(message["embeds"][1]["thumbnail"]["url"], selected.image_url)
 
         selected.drops[0].is_claimed = True
         self.notifier.drop_updated(selected.drops[0], ["Priority Game"])
@@ -96,6 +152,9 @@ class DiscordNotificationTests(unittest.TestCase):
             "New priority Drops detected",
             "Drop claimed",
         ])
+        earned = self.payloads[-1]["embeds"][0]
+        self.assertEqual(earned["image"]["url"], selected.drops[0].benefits[0].image_url)
+        self.assertIn(selected.drops[0].benefits[0].image_url, str(earned["fields"]))
 
     def test_earned_unclaimed_drop_sends_completion_message(self) -> None:
         selected = campaign()
@@ -158,6 +217,42 @@ class DiscordNotificationTests(unittest.TestCase):
         self.notifier.operational("Miner restarting", "Retrying", event_key="restart")
         self.notifier.operational("Miner restarting", "Retrying", event_key="restart")
 
+        self.assertEqual(len(self.payloads), 1)
+
+    def test_auto_badges_notify_outside_priority_without_item_spam(self) -> None:
+        selected = campaign("Badge Game", "free-watch-badge")
+        drop = selected.drops[0]
+        drop.is_free_badge = True
+        drop.is_claimed = True
+        self.notifier.drop_updated(drop, [])
+        self.assertEqual(self.payloads, [])
+        self.notifier.drop_updated(drop, [], auto_farm_badges=True)
+        self.notifier.drop_updated(drop, [], auto_farm_badges=True)
+        other = campaign("Badge Game", "subscription-or-item").drops[0]
+        other.is_claimed = True
+        self.notifier.drop_updated(other, [], auto_farm_badges=True)
+        self.assertEqual(len(self.payloads), 1)
+        self.assertEqual(self.payloads[0]["embeds"][0]["title"], "Free badge earned")
+        self.assertEqual(self.payloads[0]["embeds"][0]["footer"]["text"], "DropForge | Free badges")
+        restarted = DiscordNotifier(self.store)
+        restarted._schedule = self.payloads.append
+        restarted.drop_updated(drop, [], auto_farm_badges=True)
+        self.assertEqual(len(self.payloads), 1)
+
+    def test_auto_badge_start_includes_non_priority_categories_and_respects_opt_out(self) -> None:
+        selected = campaign("Badge Game")
+        selected.has_free_badge = True
+        manager = SimpleNamespace(
+            _twitch=SimpleNamespace(settings=SimpleNamespace(priority=[], auto_farm_badges=True)),
+            inv=SimpleNamespace(campaigns={selected.id: selected}),
+        )
+        self.notifier.badge_farming_started(manager, [selected.game])
+        self.assertEqual(len(self.payloads), 1)
+        self.assertIn("Badge Game", str(self.payloads[0]["embeds"][0]["fields"]))
+        self.notifier.update({"notify_claimed": False})
+        selected.drops[0].is_free_badge = True
+        selected.drops[0].is_claimed = True
+        self.notifier.drop_updated(selected.drops[0], [], auto_farm_badges=True)
         self.assertEqual(len(self.payloads), 1)
 
 

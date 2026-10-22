@@ -124,6 +124,7 @@ class TwitchIntegrityTests(unittest.IsolatedAsyncioTestCase):
         )
         with (
             patch("network.integrity._browser", return_value="browser"),
+            patch("network.integrity.shutil.which", return_value="xvfb-run"),
             patch("network.integrity.subprocess.Popen", return_value=process),
             patch("network.integrity._stop_browser") as stop_browser,
             patch("network.integrity.aiohttp.ClientSession", return_value=Session()),

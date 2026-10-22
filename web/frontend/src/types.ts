@@ -15,7 +15,9 @@ export type Drop = {
   current_minutes: number
   required_minutes: number
   claimed: boolean
+  claim_pending?: boolean
   earned: boolean
+  is_free_badge: boolean
   claimable: boolean
   starts: string
   ends: string
@@ -64,6 +66,7 @@ export type Settings = {
   farm_unlinked: boolean
   enable_badges_emotes: boolean
   auto_farm_badges: boolean
+  skip_unfinishable_drops: boolean
   available_drops_check: boolean
   trust_allowed_channels: boolean
   proxy: string
@@ -80,9 +83,12 @@ export type NotificationSettings = {
   notify_new_drops: boolean
   notify_status: boolean
   notify_operational: boolean
+  notify_auth: boolean
 }
 
 export type MinerState = {
+  login_method?: "browser" | "device"
+  auth_alert?: { kind?: string; message?: string; requires_login?: boolean; since?: number }
   status: string
   icon_state: string
   miner: { running: boolean; last_error: string }
